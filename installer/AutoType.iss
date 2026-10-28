@@ -21,6 +21,8 @@ OutputBaseFilename=AutoType-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+DefaultGroupName=Auto-Type
+DisableProgramGroupPage=yes
 UninstallDisplayName=Auto-Type (한영 자동) {#AppVersion}
 CloseApplications=no
 RestartIfNeededByRun=no
@@ -32,9 +34,15 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 ; regserver registers the TSF input method; the uninstaller unregisters it automatically.
 Source: "..\build-x64\Release\AutoType.dll"; DestDir: "{app}\x64"; Flags: regserver 64bit ignoreversion restartreplace uninsrestartdelete
 Source: "..\build-x86\Release\AutoType.dll"; DestDir: "{app}\x86"; Flags: regserver 32bit ignoreversion restartreplace uninsrestartdelete
+Source: "..\scripts\debug-on.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\scripts\debug-off.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\Auto-Type 진단 기록 켜기"; Filename: "{app}\debug-on.bat"
+Name: "{group}\Auto-Type 진단 기록 끄고 보기"; Filename: "{app}\debug-off.bat"
 
 [Messages]
 korean.FinishedLabel=설치가 끝났습니다.%n%nWin + Space 를 눌러 "Auto-Type (한영 자동)"을 고르세요.%n이미 열려 있던 앱은 다시 실행해야 인식합니다.%n%n원래 입력기로 돌아가려면 Win + Space 로 "Microsoft 입력기"를 고르면 됩니다.

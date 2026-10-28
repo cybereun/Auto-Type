@@ -6,7 +6,8 @@
 
 namespace autotype {
 
-class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink, public ITfCompositionSink {
+class TextService final : public ITfTextInputProcessorEx, public ITfKeyEventSink, public ITfCompositionSink,
+                          public ITfCompartmentEventSink {
 public:
     TextService();
     ~TextService();
@@ -32,6 +33,9 @@ public:
     // ITfCompositionSink
     STDMETHODIMP OnCompositionTerminated(TfEditCookie ec, ITfComposition* composition) override;
 
+    // ITfCompartmentEventSink: an app switched the IME off or to English mode
+    STDMETHODIMP OnChange(REFGUID compartment) override;
+
 private:
     enum class Action { Pass, Swallow, Append, Backspace, Toggle, CommitSpace, CommitThenPass };
     Action classify(WPARAM key, char* letter) const;
@@ -42,6 +46,7 @@ private:
     void commitNow(ITfContext* context, const std::u32string& extra);
     bool reclaim(TfEditCookie ec, ITfContext* context);
     void announceKoreanMode();
+    void watchCompartments(bool on);
 
     LONG refs_ = 1;
     ITfThreadMgr* threadMgr_ = nullptr;
@@ -51,6 +56,8 @@ private:
     // already in the document; the next letter takes it back so the word keeps being judged as one.
     bool resume_ = false;
     std::u32string orphan_;
+    DWORD openCookie_ = TF_INVALID_COOKIE;
+    DWORD modeCookie_ = TF_INVALID_COOKIE;
     Engine engine_;
 };
 

@@ -37,6 +37,39 @@ private:
 
 bool down(int vk) { return (GetKeyState(vk) & 0x8000) != 0; }
 
+}  // namespace
+
+// Writes to %LOCALAPPDATA%\AutoType\log.txt only when that folder has a file named "debug".
+void debugLog(const char* message) {
+    static int enabled = -1;
+    static wchar_t path[MAX_PATH] = {};
+    if (enabled < 0) {
+        wchar_t dir[MAX_PATH] = {}, flag[MAX_PATH] = {};
+        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", dir, MAX_PATH);
+        enabled = 0;
+        if (n > 0 && n < MAX_PATH - 40) {
+            wsprintfW(flag, L"%s\\AutoType\\debug", dir);
+            wsprintfW(path, L"%s\\AutoType\\log.txt", dir);
+            enabled = GetFileAttributesW(flag) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
+        }
+    }
+    if (!enabled) return;
+    wchar_t exe[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    const wchar_t* name = wcsrchr(exe, L'\\');
+    char line[600];
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    wsprintfA(line, "%02d:%02d:%02d.%03d %ls  %s\r\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, name ? name + 1 : exe, message);
+    HANDLE file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    DWORD written = 0;
+    WriteFile(file, line, static_cast<DWORD>(lstrlenA(line)), &written, nullptr);
+    CloseHandle(file);
+}
+
+namespace {
+
 // Re-sends a key we held back, so the app receives it after our text is committed.
 void resend(WPARAM key) {
     INPUT inputs[2] = {};
@@ -75,6 +108,8 @@ STDMETHODIMP TextService::QueryInterface(REFIID riid, void** out) {
         *out = static_cast<ITfKeyEventSink*>(this);
     else if (IsEqualIID(riid, IID_ITfCompositionSink))
         *out = static_cast<ITfCompositionSink*>(this);
+    else if (IsEqualIID(riid, IID_ITfCompartmentEventSink))
+        *out = static_cast<ITfCompartmentEventSink*>(this);
     if (!*out) return E_NOINTERFACE;
     AddRef();
     return S_OK;
@@ -101,6 +136,8 @@ STDMETHODIMP TextService::ActivateEx(ITfThreadMgr* threadMgr, TfClientId clientI
         keystrokes->Release();
     }
     announceKoreanMode();
+    watchCompartments(true);
+    debugLog("activated");
     return S_OK;
 }
 
@@ -129,6 +166,7 @@ void TextService::announceKoreanMode() {
 }
 
 STDMETHODIMP TextService::Deactivate() {
+    watchCompartments(false);
     if (threadMgr_) {
         ITfKeystrokeMgr* keystrokes = nullptr;
         if (SUCCEEDED(threadMgr_->QueryInterface(IID_ITfKeystrokeMgr, reinterpret_cast<void**>(&keystrokes)))) {
@@ -180,6 +218,9 @@ STDMETHODIMP TextService::OnSetFocus(BOOL foreground) {
 STDMETHODIMP TextService::OnTestKeyDown(ITfContext*, WPARAM wParam, LPARAM, BOOL* eaten) {
     char letter = 0;
     *eaten = classify(wParam, &letter) != Action::Pass;
+    char line[64];
+    wsprintfA(line, "key 0x%02X eaten=%d composing=%d", static_cast<unsigned>(wParam), *eaten ? 1 : 0, engine_.empty() ? 0 : 1);
+    debugLog(line);
     return S_OK;
 }
 
@@ -210,6 +251,7 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
         resume_ = false;
         orphan_.clear();
         // Could not take the word back (the app moved the caret or changed the text): start fresh.
+        debugLog(resumed ? "took the word back" : "could not take the word back");
         if (!resumed) engine_.commit();
     }
     switch (action) {
@@ -243,6 +285,7 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
 STDMETHODIMP TextService::OnCompositionTerminated(TfEditCookie, ITfComposition*) {
     // The app ended the word. Keep what is on screen, and remember it so that, if the next key
     // continues the same word, the word is taken back instead of being split (되어야 + go).
+    debugLog("app ended the composition");
     if (composition_) {
         composition_->Release();
         composition_ = nullptr;
@@ -250,6 +293,67 @@ STDMETHODIMP TextService::OnCompositionTerminated(TfEditCookie, ITfComposition*)
     if (!engine_.empty()) {
         orphan_ = engine_.text();
         resume_ = !orphan_.empty();
+    }
+    return S_OK;
+}
+
+namespace {
+ITfCompartment* compartment(ITfThreadMgr* threadMgr, const GUID& id) {
+    ITfCompartmentMgr* compartments = nullptr;
+    ITfCompartment* result = nullptr;
+    if (threadMgr && SUCCEEDED(threadMgr->QueryInterface(IID_ITfCompartmentMgr, reinterpret_cast<void**>(&compartments)))) {
+        compartments->GetCompartment(id, &result);
+        compartments->Release();
+    }
+    return result;
+}
+
+LONG readLong(ITfCompartment* item) {
+    VARIANT value;
+    VariantInit(&value);
+    LONG result = 0;
+    if (SUCCEEDED(item->GetValue(&value)) && value.vt == VT_I4) result = value.lVal;
+    VariantClear(&value);
+    return result;
+}
+}  // namespace
+
+void TextService::watchCompartments(bool on) {
+    const struct { const GUID* id; DWORD* cookie; } watched[] = {
+        {&GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &openCookie_},
+        {&GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &modeCookie_},
+    };
+    for (const auto& item : watched) {
+        ITfCompartment* target = compartment(threadMgr_, *item.id);
+        if (!target) continue;
+        ITfSource* source = nullptr;
+        if (SUCCEEDED(target->QueryInterface(IID_ITfSource, reinterpret_cast<void**>(&source)))) {
+            if (on && *item.cookie == TF_INVALID_COOKIE)
+                source->AdviseSink(IID_ITfCompartmentEventSink, static_cast<ITfCompartmentEventSink*>(this), item.cookie);
+            else if (!on && *item.cookie != TF_INVALID_COOKIE) {
+                source->UnadviseSink(*item.cookie);
+                *item.cookie = TF_INVALID_COOKIE;
+            }
+            source->Release();
+        }
+        target->Release();
+    }
+}
+
+// Auto-Type has no English mode: an app (KakaoTalk remembers 한/영 per chat) that turns the IME off or
+// to alphanumeric would make Windows bypass us and send raw letters, so the mode is put straight back.
+STDMETHODIMP TextService::OnChange(REFGUID id) {
+    const bool open = IsEqualGUID(id, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+    const bool mode = IsEqualGUID(id, GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION);
+    if (!open && !mode) return S_OK;
+    ITfCompartment* target = compartment(threadMgr_, id);
+    if (!target) return S_OK;
+    const LONG value = readLong(target);
+    const bool off = open ? value == 0 : (value & TF_CONVERSIONMODE_NATIVE) == 0;
+    target->Release();
+    if (off) {
+        debugLog(open ? "app closed the IME; reopening" : "app set English mode; restoring Hangul");
+        announceKoreanMode();
     }
     return S_OK;
 }

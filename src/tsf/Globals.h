@@ -31,6 +31,7 @@ inline constexpr int kModelResource = 101;
 extern HINSTANCE g_module;
 extern LONG g_refs;
 const Model& sharedModel();
+void debugLog(const char* message);
 
 void dllAddRef();
 void dllRelease();
