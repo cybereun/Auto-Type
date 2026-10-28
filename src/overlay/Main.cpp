@@ -16,13 +16,14 @@ constexpr UINT kTrayMessage = WM_APP + 1;
 Model model;
 std::unique_ptr<PendingWord> word;
 HWND mainWindow=nullptr, previewWindow=nullptr, toggleButton=nullptr, statusLabel=nullptr;
+HWND brandLabel=nullptr, versionLabel=nullptr, headingLabel=nullptr, descriptionLabel=nullptr, helperLabel=nullptr;
 HWND ownerFocus=nullptr, ownerForeground=nullptr;
 HWND passFocus=nullptr, passForeground=nullptr;
 RECT ownerBounds{};
 POINT lastClick{};
 HWND lastClickForeground=nullptr;
 HHOOK keyboardHook=nullptr, mouseHook=nullptr;
-HFONT textFont=nullptr, uiFont=nullptr, titleFont=nullptr;
+HFONT textFont=nullptr, uiFont=nullptr, titleFont=nullptr, smallFont=nullptr, microFont=nullptr, buttonFont=nullptr;
 HANDLE monitorStop=nullptr, monitorThread=nullptr;
 SRWLOCK focusLock=SRWLOCK_INIT;
 struct FocusSnapshot { HWND foreground=nullptr, focus=nullptr; RECT bounds{}; bool writable=false; ULONGLONG checkedAt=0, epoch=0; };
@@ -31,6 +32,12 @@ std::atomic<ULONGLONG> focusEpoch{1};
 bool enabled=false;
 bool sending=false;
 bool blockedWord=false;
+constexpr COLORREF kCanvas=RGB(248,249,252);
+constexpr COLORREF kInk=RGB(26,32,44);
+constexpr COLORREF kMuted=RGB(111,120,137);
+constexpr COLORREF kBlue=RGB(63,91,214);
+constexpr COLORREF kStatusBg=RGB(238,241,248);
+HBRUSH canvasBrush=nullptr;
 
 std::wstring wide(const std::u32string& value) {
     auto s=toUtf16(value); return std::wstring(s.begin(),s.end());
@@ -140,6 +147,23 @@ void refreshPreview() {
     InvalidateRect(previewWindow,nullptr,TRUE);
 }
 void status(const wchar_t* value) { if(statusLabel) SetWindowTextW(statusLabel,value); }
+
+void drawRoundedButton(const DRAWITEMSTRUCT* item) {
+    HDC dc=item->hDC; RECT r=item->rcItem;
+    const bool primary=item->CtlID==1;
+    COLORREF fill=primary?kBlue:RGB(255,255,255);
+    COLORREF edge=primary?kBlue:RGB(225,229,237);
+    COLORREF ink=primary?RGB(255,255,255):RGB(61,69,84);
+    if(item->itemState&ODS_SELECTED) fill=primary?RGB(48,70,178):RGB(239,242,248);
+    HBRUSH brush=CreateSolidBrush(fill); HPEN pen=CreatePen(PS_SOLID,1,edge);
+    HGDIOBJ oldBrush=SelectObject(dc,brush), oldPen=SelectObject(dc,pen);
+    RoundRect(dc,r.left+1,r.top+1,r.right-1,r.bottom-1,10,10);
+    SelectObject(dc,oldBrush); SelectObject(dc,oldPen); DeleteObject(brush); DeleteObject(pen);
+    SetBkMode(dc,TRANSPARENT); SetTextColor(dc,ink);
+    HGDIOBJ oldFont=SelectObject(dc,buttonFont); RECT text=r;
+    DrawTextW(dc,item->CtlID==1?(enabled?L"자동 입력 끄기":L"자동 입력 켜기"):L"대기 입력 취소",-1,&text,DT_SINGLELINE|DT_VCENTER|DT_CENTER|DT_NOPREFIX);
+    SelectObject(dc,oldFont);
+}
 
 // The target receives one complete word. No backspaces and no replacement of existing text.
 bool sendWord(WPARAM followKey=0) {
@@ -270,24 +294,57 @@ void setEnabled(bool value) {
     if(!value && word && !word->empty()) { status(L"입력 중인 단어를 스페이스로 확정하거나 Esc로 취소하세요."); return; }
     enabled=value; SetWindowTextW(toggleButton,enabled?L"자동 입력 끄기":L"자동 입력 켜기");
     status(enabled?L"켜짐 · 다른 앱의 입력창에서 입력하세요.":L"꺼짐 · 버튼을 눌러 시작하세요.");
+    InvalidateRect(toggleButton,nullptr,TRUE);
     refreshPreview();
 }
 LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM l) {
     if(m==WM_CREATE) {
-        HWND title=CreateWindowW(L"STATIC",L"Auto-Type v" AUTOTYPE_VERSION,WS_CHILD|WS_VISIBLE,24,18,450,36,h,nullptr,nullptr,nullptr);
-        CreateWindowW(L"STATIC",L"한글과 영어를 자동으로 판단합니다.\n입력 미리보기는 스페이스를 누르면 입력됩니다.",WS_CHILD|WS_VISIBLE,24,65,460,48,h,nullptr,nullptr,nullptr);
-        toggleButton=CreateWindowW(L"BUTTON",L"자동 입력 켜기",WS_CHILD|WS_VISIBLE|WS_TABSTOP,24,126,180,42,h,(HMENU)1,nullptr,nullptr);
-        CreateWindowW(L"BUTTON",L"대기 입력 취소",WS_CHILD|WS_VISIBLE|WS_TABSTOP,220,126,180,42,h,(HMENU)2,nullptr,nullptr);
-        statusLabel=CreateWindowW(L"STATIC",L"꺼짐 · 버튼을 눌러 시작하세요.",WS_CHILD|WS_VISIBLE,24,183,460,50,h,nullptr,nullptr,nullptr);
-        CreateWindowW(L"STATIC",L"한/영 또는 Shift+Space: 시작 언어 변경 · Esc: 입력 취소",WS_CHILD|WS_VISIBLE,24,250,460,45,h,nullptr,nullptr,nullptr);
+        brandLabel=CreateWindowW(L"STATIC",L"Auto-Type",WS_CHILD|WS_VISIBLE,22,16,190,28,h,nullptr,nullptr,nullptr);
+        versionLabel=CreateWindowW(L"STATIC",L"v" AUTOTYPE_VERSION,WS_CHILD|WS_VISIBLE|SS_RIGHT,316,19,52,20,h,nullptr,nullptr,nullptr);
+        headingLabel=CreateWindowW(L"STATIC",L"한·영 자동 전환",WS_CHILD|WS_VISIBLE,22,58,340,30,h,nullptr,nullptr,nullptr);
+        descriptionLabel=CreateWindowW(L"STATIC",L"입력 중인 단어를 보고 자연스럽게 바꿔요",WS_CHILD|WS_VISIBLE,23,91,340,22,h,nullptr,nullptr,nullptr);
+        toggleButton=CreateWindowW(L"BUTTON",L"자동 입력 켜기",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,21,129,204,46,h,(HMENU)1,nullptr,nullptr);
+        CreateWindowW(L"BUTTON",L"대기 입력 취소",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,235,129,133,46,h,(HMENU)2,nullptr,nullptr);
+        statusLabel=CreateWindowW(L"STATIC",L"꺼짐 · 시작하려면 버튼을 눌러주세요",WS_CHILD|WS_VISIBLE|SS_LEFT,47,187,313,30,h,nullptr,nullptr,nullptr);
+        helperLabel=CreateWindowW(L"STATIC",L"한/영 전환     Space 확정     Esc 취소",WS_CHILD|WS_VISIBLE|SS_CENTER,24,226,342,18,h,nullptr,nullptr,nullptr);
         EnumChildWindows(h,[](HWND child, LPARAM font)->BOOL { SendMessageW(child,WM_SETFONT,(WPARAM)font,TRUE); return TRUE; },(LPARAM)uiFont);
-        SendMessageW(title,WM_SETFONT,(WPARAM)titleFont,TRUE);
+        SendMessageW(brandLabel,WM_SETFONT,(WPARAM)titleFont,TRUE);
+        SendMessageW(versionLabel,WM_SETFONT,(WPARAM)microFont,TRUE);
+        SendMessageW(headingLabel,WM_SETFONT,(WPARAM)titleFont,TRUE);
+        SendMessageW(descriptionLabel,WM_SETFONT,(WPARAM)smallFont,TRUE);
+        SendMessageW(statusLabel,WM_SETFONT,(WPARAM)smallFont,TRUE);
+        SendMessageW(helperLabel,WM_SETFONT,(WPARAM)microFont,TRUE);
         SetTimer(h,1,300,nullptr); return 0;
     }
-    if(m==WM_COMMAND && LOWORD(w)==1) { setEnabled(!enabled); return 0; }
+    if(m==WM_ERASEBKGND) {
+        RECT r{}; GetClientRect(h,&r); FillRect((HDC)w,&r,canvasBrush); return 1;
+    }
+    if(m==WM_PAINT) {
+        PAINTSTRUCT ps{}; HDC dc=BeginPaint(h,&ps);
+        RECT r{20,182,370,219}; COLORREF card=enabled?RGB(235,247,240):kStatusBg;
+        HBRUSH brush=CreateSolidBrush(card); HPEN pen=CreatePen(PS_SOLID,1,card);
+        HGDIOBJ oldBrush=SelectObject(dc,brush), oldPen=SelectObject(dc,pen);
+        RoundRect(dc,r.left,r.top,r.right,r.bottom,12,12);
+        SelectObject(dc,oldBrush); SelectObject(dc,oldPen); DeleteObject(brush); DeleteObject(pen);
+        HBRUSH dot=CreateSolidBrush(enabled?RGB(44,160,103):RGB(150,159,174));
+        HPEN dotPen=CreatePen(PS_SOLID,1,enabled?RGB(44,160,103):RGB(150,159,174));
+        HGDIOBJ oldDot=SelectObject(dc,dot), oldDotPen=SelectObject(dc,dotPen);
+        Ellipse(dc,31,196,39,204); SelectObject(dc,oldDot); SelectObject(dc,oldDotPen);
+        DeleteObject(dot); DeleteObject(dotPen);
+        EndPaint(h,&ps); return 0;
+    }
+    if(m==WM_CTLCOLORSTATIC) {
+        HDC dc=(HDC)w; HWND control=(HWND)l;
+        SetBkMode(dc,TRANSPARENT);
+        if(control==statusLabel) SetTextColor(dc,enabled?RGB(42,120,82):kMuted);
+        else SetTextColor(dc,(control==brandLabel || control==headingLabel)?kInk:kMuted);
+        return (LRESULT)canvasBrush;
+    }
+    if(m==WM_DRAWITEM) { drawRoundedButton((DRAWITEMSTRUCT*)l); return TRUE; }
+    if(m==WM_COMMAND && LOWORD(w)==1) { setEnabled(!enabled); InvalidateRect(h,nullptr,TRUE); return 0; }
     if(m==WM_COMMAND && LOWORD(w)==2) {
         word->clear(); ownerFocus=nullptr; ownerForeground=nullptr; blockedWord=false;
-        status(enabled?L"켜짐 · 다른 앱의 입력창에서 입력하세요.":L"꺼짐 · 버튼을 눌러 시작하세요."); refreshPreview(); return 0;
+        status(enabled?L"켜짐 · 입력할 곳을 클릭하세요":L"꺼짐 · 시작하려면 버튼을 눌러주세요"); refreshPreview(); InvalidateRect(h,nullptr,TRUE); return 0;
     }
     if(m==WM_TIMER) {
         if(word && !word->empty() && !ownerIsFocused() && !blockedWord) {
@@ -310,13 +367,20 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show) {
     HGLOBAL data=r?LoadResource(instance,r):nullptr;
     if(!data || !model.load((const uint8_t*)LockResource(data),SizeofResource(instance,r))) return 3;
     word=std::make_unique<PendingWord>(model);
+    canvasBrush=CreateSolidBrush(kCanvas);
     textFont=CreateFontW(-23,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
-    uiFont=CreateFontW(-16,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
-    titleFont=CreateFontW(-25,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
+    uiFont=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
+    titleFont=CreateFontW(-22,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
+    smallFont=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
+    microFont=CreateFontW(-12,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
+    buttonFont=CreateFontW(-15,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
     WNDCLASSW wc{}; wc.hInstance=instance; wc.lpszClassName=L"AutoTypePreviewWord"; wc.lpfnWndProc=previewProc; wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1); RegisterClassW(&wc);
     previewWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,wc.lpszClassName,L"",WS_POPUP|WS_BORDER,0,0,380,52,nullptr,nullptr,instance,nullptr);
     wc.lpszClassName=L"AutoTypeStandaloneWindow"; wc.lpfnWndProc=windowProc; wc.hCursor=LoadCursorW(nullptr,IDC_ARROW); wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(201)); RegisterClassW(&wc);
-    mainWindow=CreateWindowW(wc.lpszClassName,L"Auto-Type v" AUTOTYPE_VERSION,WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,100,100,510,350,nullptr,nullptr,instance,nullptr);
+    DWORD windowStyle=WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX;
+    RECT windowRect{0,0,390,252}; AdjustWindowRectEx(&windowRect,windowStyle,FALSE,0);
+    mainWindow=CreateWindowExW(WS_EX_APPWINDOW,wc.lpszClassName,L"Auto-Type v" AUTOTYPE_VERSION,windowStyle,100,100,
+        windowRect.right-windowRect.left,windowRect.bottom-windowRect.top,nullptr,nullptr,instance,nullptr);
     monitorStop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     if(monitorStop) monitorThread=CreateThread(nullptr,0,watchFocus,nullptr,0,nullptr);
     keyboardHook=SetWindowsHookExW(WH_KEYBOARD_LL,keyHook,instance,0);
@@ -330,6 +394,10 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show) {
     if(textFont) DeleteObject(textFont);
     if(uiFont) DeleteObject(uiFont);
     if(titleFont) DeleteObject(titleFont);
+    if(smallFont) DeleteObject(smallFont);
+    if(microFont) DeleteObject(microFont);
+    if(buttonFont) DeleteObject(buttonFont);
+    if(canvasBrush) DeleteObject(canvasBrush);
     if(monitorStop) SetEvent(monitorStop);
     DWORD monitorExit=monitorThread?WaitForSingleObject(monitorThread,2000):WAIT_OBJECT_0;
     if(monitorThread) CloseHandle(monitorThread);
