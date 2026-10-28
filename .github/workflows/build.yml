@@ -26,13 +26,12 @@ jobs:
 
       - name: Build x64
         run: |
-          cmake -S . -B build-x64 -A x64 -DAUTOTYPE_VERSION=${{ steps.version.outputs.value }}
-          Get-Content build-x64/AutoType.rc | Select-Object -First 12
+          cmake -S . -B build-x64 -A x64 "-DAUTOTYPE_VERSION=${{ steps.version.outputs.value }}"
           cmake --build build-x64 --config Release
 
       - name: Build x86
         run: |
-          cmake -S . -B build-x86 -A Win32 -DAUTOTYPE_VERSION=${{ steps.version.outputs.value }}
+          cmake -S . -B build-x86 -A Win32 "-DAUTOTYPE_VERSION=${{ steps.version.outputs.value }}"
           cmake --build build-x86 --config Release
 
       - name: Engine tests
