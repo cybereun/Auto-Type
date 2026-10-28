@@ -1,2 +1,30 @@
 // The language model is embedded so the input method is a single DLL.
+#include <winver.h>
+
 101 RCDATA "../../resources/model-v2.dat"
+
+#include "Version.h"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION AT_VER_MAJOR, AT_VER_MINOR, AT_VER_PATCH, 0
+PRODUCTVERSION AT_VER_MAJOR, AT_VER_MINOR, AT_VER_PATCH, 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_DLL
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "cybereun"
+      VALUE "FileDescription", "Auto-Type Korean/English input method"
+      VALUE "ProductName", "Auto-Type"
+      VALUE "FileVersion", AT_VER_STR
+      VALUE "ProductVersion", AT_VER_STR
+      VALUE "LegalCopyright", "MIT License"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 1200
+  END
+END

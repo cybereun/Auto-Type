@@ -8,6 +8,7 @@
   <img alt="language" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white">
   <img alt="TSF" src="https://img.shields.io/badge/Text%20Services%20Framework-IME-5C2D91">
   <img alt="offline" src="https://img.shields.io/badge/network-offline%20only-2ea44f">
+  <a href="https://github.com/cybereun/Auto-Type/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/cybereun/Auto-Type?include_prereleases"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-yellow"></a>
 </p>
 
@@ -70,22 +71,25 @@ macOS 입력기 [Tavi](https://github.com/3x-haust/tavi)의 판단 로직을 C++
 - 한국어 언어 팩 (설정 → 시간 및 언어 → 언어 및 지역에 "한국어"가 있으면 됩니다)
 - 관리자 권한
 
-### 순서
-1. [Actions → build](https://github.com/cybereun/Auto-Type/actions/workflows/build.yml)에서 초록색 체크가 붙은 최신 실행을 엽니다.
-2. 아래쪽 **Artifacts**의 `AutoType-windows`를 받아 압축을 풉니다.
+### 가장 쉬운 방법: 설치 파일(EXE)
+1. [Releases](https://github.com/cybereun/Auto-Type/releases/latest)에서 `AutoType-Setup-<버전>.exe`를 받습니다.
+2. 더블클릭해 실행하고, 관리자 권한 요청이 뜨면 **예**를 누릅니다.
+3. 끝나면 **Win + Space**로 `Auto-Type (한영 자동)`을 고릅니다. 이미 열려 있던 앱은 다시 실행해야 인식합니다.
+
+제거는 **설정 → 앱 → 설치된 앱 → Auto-Type → 제거**입니다.
+
+### 수동 설치 (portable.zip)
+1. 같은 Releases 페이지에서 `AutoType-<버전>-portable.zip`을 받아 압축을 풉니다.
    ```
-   AutoType-windows/
    ├─ x64/AutoType.dll      64비트 앱용 (대부분의 앱)
    ├─ x86/AutoType.dll      32비트 앱용
    ├─ install.bat
    └─ uninstall.bat
    ```
-3. `install.bat`을 **우클릭 → 관리자 권한으로 실행**합니다.
-   파일은 `C:\Program Files\AutoType`에 복사되고 `regsvr32`로 등록됩니다.
-4. **설정 → 시간 및 언어 → 언어 및 지역 → 한국어 옆 ⋯ → 언어 옵션 → 키보드**에서 `Auto-Type (한영 자동)`이 보이는지 확인합니다.
-5. 이미 열려 있던 앱은 다시 실행해야 새 입력기를 인식합니다.
+2. `install.bat`을 **우클릭 → 관리자 권한으로 실행**합니다. 파일은 `C:\Program Files\AutoType`에 복사되고 `regsvr32`로 등록됩니다.
+3. **설정 → 시간 및 언어 → 언어 및 지역 → 한국어 옆 ⋯ → 언어 옵션 → 키보드**에서 `Auto-Type (한영 자동)`이 보이는지 확인합니다.
 
-> 코드 서명이 아직 없어서 SmartScreen이나 백신이 경고할 수 있습니다. 소스가 모두 이 저장소에 있으니 직접 빌드해서 쓸 수도 있습니다.
+> 코드 서명이 아직 없어서 SmartScreen이 막으면 **추가 정보 → 실행**을 누르세요. 백신이 경고할 수도 있습니다. 소스가 모두 이 저장소에 있으니 직접 빌드해서 쓸 수도 있습니다.
 
 ## 사용 방법
 
@@ -140,7 +144,7 @@ dkssud ␣        안녕 (확정)
 | 잠깐 Microsoft 입력기로 | **Win + Space** → `Microsoft 입력기` |
 | 다시 Auto-Type으로 | **Win + Space** → `Auto-Type (한영 자동)` |
 | 목록에서만 숨기기 | 설정 → 언어 옵션 → 키보드에서 `Auto-Type` 제거 (나중에 다시 추가 가능) |
-| 완전히 지우기 | `uninstall.bat`을 관리자 권한으로 실행. Microsoft 입력기는 그대로 남습니다 |
+| 완전히 지우기 | 설정 → 앱 → `Auto-Type` → 제거 (수동 설치는 `uninstall.bat`). Microsoft 입력기는 그대로 남습니다 |
 
 제거 후 파일이 남아 있으면, 그 DLL을 쓰던 앱이 아직 열려 있는 것입니다. 재부팅 후 `uninstall.bat`을 한 번 더 실행하세요.
 
@@ -198,6 +202,21 @@ cmake -S . -B build-win -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_CXX_COMPILER=x86_64-
 cmake --build build-win
 ```
 
+## 릴리스 만들기 (개발자용)
+
+1. `VERSION` 파일의 숫자를 올리고 커밋합니다 (예: `0.2.0`).
+2. 같은 버전의 태그를 붙여 푸시합니다.
+
+```bash
+git tag v0.2.0
+```
+
+```bash
+git push origin v0.2.0
+```
+
+GitHub Actions가 x64·x86 DLL을 빌드하고 테스트를 돌린 뒤, `AutoType-Setup-0.2.0.exe`와 `portable.zip`을 Releases에 올립니다.
+
 ## 프로젝트 구조
 
 ```
@@ -215,7 +234,9 @@ Auto-Type/
 ├─ resources/model-v2.dat  언어 모델 (Tavi, MIT)
 ├─ tests/engine_test.cpp   엔진 테스트
 ├─ scripts/                install.bat, uninstall.bat
-└─ .github/workflows/      Windows x64·x86 자동 빌드와 테스트
+├─ installer/AutoType.iss  EXE 설치 파일 (Inno Setup)
+├─ VERSION                 현재 버전
+└─ .github/workflows/      Windows x64·x86 빌드, 테스트, 설치 파일, 릴리스
 ```
 
 ## 알려진 한계와 로드맵
@@ -230,7 +251,8 @@ Auto-Type/
 - [ ] 입력 중인 단어 밑줄 표시 (Display Attribute)
 - [ ] 개인 단어 학습: 같은 표기를 세 번 확정하면 기억
 - [ ] 작업표시줄 모드 아이콘과 설정 메뉴
-- [ ] 코드 서명된 설치 프로그램 (MSI)
+- [x] EXE 설치 파일과 버전별 릴리스
+- [ ] 코드 서명
 - [ ] 후보 목록 창
 
 ## 개발자 정보
