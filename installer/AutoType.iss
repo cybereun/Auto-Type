@@ -11,7 +11,6 @@ AppVerName=Auto-Type {#AppVersion}
 AppPublisher=cybereun
 AppPublisherURL=https://github.com/cybereun/Auto-Type
 DefaultDirName={autopf}\AutoType
-DisableProgramDirPage=yes
 DisableDirPage=yes
 DisableReadyPage=yes
 PrivilegesRequired=admin
