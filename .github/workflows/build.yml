@@ -33,15 +33,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & build-x64/Release/pending_word_test.exe resources/model-v2.dat
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          $compiler = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $compiler) { $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $compiler "/DAppVersion=${{ steps.version.outputs.value }}" installer/AutoType-standalone.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Package executable
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
           $name = "Auto-Type-${{ steps.version.outputs.value }}-Windows-x64.exe"
           Copy-Item build-x64/Release/AutoTypePreview.exe "out/$name"
-          Copy-Item USAGE.md 'out/사용안내.md'
-          $hash = (Get-FileHash "out/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $name" | Set-Content -Encoding ascii out/SHA256SUMS.txt
+          Copy-Item USAGE.md 'out/USAGE.md'
+          $files = Get-ChildItem out/*.exe | Sort-Object Name
+          $sums = foreach ($file in $files) { "{0}  {1}" -f (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $file.Name }
+          $sums | Set-Content -Encoding ascii out/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: Auto-Type-${{ steps.version.outputs.value }}-Windows-x64
@@ -54,7 +63,7 @@ jobs:
           name: Auto-Type v${{ steps.version.outputs.value }}
           files: out/*
           body: |
-            Windows 64비트용 단독 실행 파일입니다. EXE를 실행하고 자동 입력 켜기를 누르세요.
+            Windows 64비트용 설치 파일과 단독 실행 파일입니다. 설치 파일은 바탕화면과 시작 메뉴에 바로가기를 만듭니다. 실행 후 자동 입력 켜기를 누르세요.
 
             입력 중인 단어는 별도 미리보기 창에 표시되며, 스페이스 또는 Enter로 확정합니다. 한/영 키 또는 Shift+Space로 시작 언어를 바꿀 수 있습니다.
 

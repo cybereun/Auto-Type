@@ -315,7 +315,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show) {
     titleFont=CreateFontW(-25,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
     WNDCLASSW wc{}; wc.hInstance=instance; wc.lpszClassName=L"AutoTypePreviewWord"; wc.lpfnWndProc=previewProc; wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1); RegisterClassW(&wc);
     previewWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,wc.lpszClassName,L"",WS_POPUP|WS_BORDER,0,0,380,52,nullptr,nullptr,instance,nullptr);
-    wc.lpszClassName=L"AutoTypeStandaloneWindow"; wc.lpfnWndProc=windowProc; wc.hCursor=LoadCursorW(nullptr,IDC_ARROW); wc.hIcon=LoadIconW(nullptr,IDI_APPLICATION); RegisterClassW(&wc);
+    wc.lpszClassName=L"AutoTypeStandaloneWindow"; wc.lpfnWndProc=windowProc; wc.hCursor=LoadCursorW(nullptr,IDC_ARROW); wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(201)); RegisterClassW(&wc);
     mainWindow=CreateWindowW(wc.lpszClassName,L"Auto-Type v" AUTOTYPE_VERSION,WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,100,100,510,350,nullptr,nullptr,instance,nullptr);
     monitorStop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     if(monitorStop) monitorThread=CreateThread(nullptr,0,watchFocus,nullptr,0,nullptr);
