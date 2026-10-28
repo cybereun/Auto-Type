@@ -3,6 +3,8 @@ project(AutoType LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Static CRT for every target, so the IME DLL has no runtime dependency and the test links against the same CRT.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_library(autotype_core STATIC src/core/Engine.cpp)
 target_include_directories(autotype_core PUBLIC src/core)
@@ -23,7 +25,6 @@ if(WIN32)
     target_compile_options(AutoType PRIVATE /utf-8)
     target_compile_options(autotype_core PRIVATE /utf-8)
     target_compile_options(engine_test PRIVATE /utf-8)
-    set_property(TARGET AutoType autotype_core PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
   else()
     target_link_options(AutoType PRIVATE -static)
   endif()
