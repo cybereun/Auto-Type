@@ -189,9 +189,8 @@ STDMETHODIMP TextService::Deactivate() {
 TextService::Action TextService::classify(WPARAM key, char* letter) const {
     const bool composing = !engine_.empty() && !resume_;
     const bool shift = down(VK_SHIFT);
-    // Idle 한/영 key is swallowed: it would otherwise switch Windows to "IME off" and stop Auto-Type.
-    if (key == VK_HANGUL) return composing ? Action::Toggle : Action::Swallow;
-    if (key == VK_SPACE && shift) return composing ? Action::Toggle : Action::Pass;
+    // Keep the IME active while changing the initial language hint or the current word.
+    if (key == VK_HANGUL || (key == VK_SPACE && shift)) return Action::Toggle;
     if (key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT || key == VK_CAPITAL) return Action::Pass;
     if (down(VK_CONTROL) || down(VK_MENU) || down(VK_LWIN) || down(VK_RWIN))
         return composing ? Action::CommitThenPass : Action::Pass;
@@ -269,7 +268,7 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
             break;
         case Action::Toggle:
             engine_.toggleLanguage();
-            runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
+            if (!engine_.empty()) runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
             break;
         case Action::CommitSpace:
             commitNow(context, U" ");

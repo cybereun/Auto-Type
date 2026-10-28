@@ -1,0 +1,2 @@
+#pragma once
+#define AUTOTYPE_VERSION L"@PROJECT_VERSION@"

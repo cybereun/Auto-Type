@@ -66,6 +66,7 @@ public:
     void backspace();
     // Flips the current word between the Korean and the English reading (the 한/영 key).
     void toggleLanguage();
+    bool startsInKorean() const { return startKorean_; }
     // Returns the final text and resets the word.
     std::u32string commit();
     void clear();
@@ -85,6 +86,7 @@ private:
     std::u32string previous_;
     std::vector<Candidate> candidates_;
     enum class Lock { None, Korean, Latin } lock_ = Lock::None;
+    bool startKorean_ = true;
 };
 
 }  // namespace autotype

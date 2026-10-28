@@ -374,11 +374,17 @@ std::vector<Candidate> Engine::score(const std::string& raw) const {
     double englishScore = english.score;
     double koreanScore = model_.koreanScore(hangulText);
 
+    // A single initial capital that cannot represent a shifted Korean key is
+    // a strong signal for a capitalized English word, such as Google.
+    const bool capitalizedLatin = raw.size() > 1 && isUpper(raw[0]) && !koreanShiftKey(raw[0]) &&
+        std::all_of(raw.begin() + 1, raw.end(), isLower);
+
     auto firstUpper = std::find_if(raw.begin(), raw.end(), isUpper);
     const bool koreanShift = anyOf(raw, isLower) && firstUpper != raw.end() && koreanShiftKey(*firstUpper) &&
                              std::all_of(raw.begin(), raw.end(), isLetter) && hangul::jamoCount(hangulText) == 0;
     if (isStructuredLatin(raw) && !koreanShift) englishScore = std::max(englishScore, 14.0);
     else if (isAcronym(raw)) englishScore = std::max(englishScore, 10.0);
+    else if (capitalizedLatin) englishScore = std::max(englishScore, 15.0);
     if (!previous_.empty()) {
         if (hasSyllable(previous_)) koreanScore += 0.45;
         else if (hasLatin(previous_)) englishScore += 0.35;
@@ -401,13 +407,15 @@ std::vector<Candidate> Engine::score(const std::string& raw) const {
     };
 
     const bool ascii = std::all_of(raw.begin(), raw.end(), [](char c) { return static_cast<unsigned char>(c) < 128; });
-    if (raw.size() >= 3 && english.tier == Model::Tier::Unknown && ascii) {
+    if (raw.size() >= 3 && english.tier == Model::Tier::Unknown && ascii && !capitalizedLatin) {
         for (size_t split = 2; split < raw.size(); ++split) {
             const std::string head = raw.substr(0, split), tail = raw.substr(split);
             const bool allowsSplit = !wholeKoreanWord || (firstUpper != raw.end() && !koreanShiftKey(*firstUpper));
             const bool trustedHead = model_.isEnglishWord(head) || isAcronym(head);
             const bool plausibleNewName = !trustedHead && suffixKeys().count(tail) && head.size() >= 3 &&
-                                          !model_.isKnownKorean(hangulText) && model_.englishEvidence(head).score >= 2.8;
+                                          !model_.isKnownKorean(hangulText) &&
+                                          !(completeKorean && koreanScore >= 5.5) &&
+                                          model_.englishEvidence(head).score >= 2.8;
             if ((trustedHead || plausibleNewName) && allowsSplit) {
                 const std::u32string tailHangul = hangul::compose(tail);
                 const double length = std::min<double>(static_cast<double>(head.size()), 8) / 10;
@@ -450,6 +458,8 @@ void Engine::refresh() {
     if (raw_.empty()) { text_.clear(); candidates_.clear(); return; }
     if (lock_ == Lock::Korean) { text_ = hangul::compose(raw_); return; }
     if (lock_ == Lock::Latin) { text_ = fromAscii(raw_); return; }
+    // A start preference is a hint, not a word lock: later keys still run detection.
+    if (!startKorean_ && raw_.size() <= 2) { text_ = fromAscii(raw_); return; }
 
     const bool shownKorean = isPlausibleKorean(text_);
     candidates_ = score(raw_);
@@ -489,7 +499,7 @@ void Engine::backspace() {
 }
 
 void Engine::toggleLanguage() {
-    if (raw_.empty()) return;
+    if (raw_.empty()) { startKorean_ = !startKorean_; return; }
     lock_ = isKoreanOnly(text_) || hasSyllable(text_) ? Lock::Latin : Lock::Korean;
     refresh();
 }
