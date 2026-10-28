@@ -13,6 +13,10 @@
 </p>
 
 <p align="center">
+  <a href="https://cybereun.github.io/Auto-Type/"><b>홈페이지에서 바로 체험하기 →</b></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/cybereun"><img alt="developer" src="https://img.shields.io/badge/developer-cybereun-181717?logo=github"></a>
 </p>
 
@@ -235,6 +239,7 @@ Auto-Type/
 │     └─ AutoType.def      DLL 내보내기 목록
 ├─ resources/model-v2.dat  언어 모델 (Tavi, MIT)
 ├─ tests/engine_test.cpp   엔진 테스트
+├─ docs/                   홍보 페이지 (GitHub Pages) + 브라우저용 엔진 engine.js
 ├─ scripts/                install.bat, uninstall.bat
 ├─ installer/AutoType.iss  EXE 설치 파일 (Inno Setup)
 ├─ VERSION                 현재 버전
