@@ -1,7 +1,6 @@
 #include "TextService.h"
 
 #include <algorithm>
-#include <vector>
 #include <string>
 
 namespace autotype {
@@ -80,31 +79,6 @@ void resend(WPARAM key) {
     }
     inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
     SendInput(2, inputs, sizeof(INPUT));
-}
-
-// Marks keys we inject ourselves so the key sink can tell them from the user's typing.
-constexpr ULONG_PTR kInjected = 0x41545950;  // "ATYP"
-
-bool injected() { return static_cast<ULONG_PTR>(GetMessageExtraInfo()) == kInjected; }
-
-// Erases `count` characters before the caret, then re-sends `key`, all as one ordered input batch.
-bool retype(size_t count, WPARAM key) {
-    std::vector<INPUT> inputs;
-    auto push = [&](WORD vk, DWORD flags) {
-        INPUT input = {};
-        input.type = INPUT_KEYBOARD;
-        input.ki.wVk = vk;
-        input.ki.dwFlags = flags;
-        input.ki.dwExtraInfo = kInjected;
-        inputs.push_back(input);
-    };
-    for (size_t i = 0; i < count; ++i) {
-        push(VK_BACK, 0);
-        push(VK_BACK, KEYEVENTF_KEYUP);
-    }
-    push(static_cast<WORD>(key), 0);
-    push(static_cast<WORD>(key), KEYEVENTF_KEYUP);
-    return SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT)) == inputs.size();
 }
 
 void moveCaretToEnd(TfEditCookie ec, ITfContext* context, ITfRange* range) {
@@ -212,16 +186,7 @@ STDMETHODIMP TextService::Deactivate() {
     return S_OK;
 }
 
-TextService::Action TextService::classify(WPARAM key, char* letter, bool ignoreRetype) const {
-    // Our own erase keys (see retype) go straight to the app.
-    if (key == VK_BACK && (pendingErase_ > 0 || injected())) return Action::Pass;
-    if (retyping_ && !ignoreRetype) {
-        const bool modifier = key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT || key == VK_CAPITAL ||
-                              key == VK_CONTROL || key == VK_MENU;
-        if (modifier) return Action::Pass;
-        // Once our backspaces are through, the next key is the one we re-sent.
-        if (!(pendingErase_ == 0 && key == retypeKey_)) return Action::Queue;
-    }
+TextService::Action TextService::classify(WPARAM key, char* letter) const {
     const bool composing = !engine_.empty() && !resume_;
     const bool shift = down(VK_SHIFT);
     // Idle 한/영 key is swallowed: it would otherwise switch Windows to "IME off" and stop Auto-Type.
@@ -250,20 +215,9 @@ STDMETHODIMP TextService::OnSetFocus(BOOL foreground) {
     return S_OK;
 }
 
-STDMETHODIMP TextService::OnTestKeyDown(ITfContext* context, WPARAM wParam, LPARAM, BOOL* eaten) {
-    if (retyping_ && GetTickCount() - retypeAt_ > 500) {
-        // Our re-sent key never came back: stop holding keys and replay what was held.
-        debugLog("re-type timed out");
-        retyping_ = false;
-        pendingErase_ = 0;
-        engine_.commit();
-        std::vector<Queued> pending;
-        pending.swap(queued_);
-        for (const Queued& item : pending) apply(context, item.action, item.letter, item.key);
-    }
+STDMETHODIMP TextService::OnTestKeyDown(ITfContext*, WPARAM wParam, LPARAM, BOOL* eaten) {
     char letter = 0;
     *eaten = classify(wParam, &letter) != Action::Pass;
-    if (wParam == VK_BACK && pendingErase_ > 0) --pendingErase_;
     char line[64];
     wsprintfA(line, "key 0x%02X eaten=%d composing=%d", static_cast<unsigned>(wParam), *eaten ? 1 : 0, engine_.empty() ? 0 : 1);
     debugLog(line);
@@ -292,92 +246,40 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
     if (resume_) {
         bool resumed = false;
         if (action == Action::Append) {
-            runEdit(context, [&](TfEditCookie ec) { resumed = reclaim(ec, context); }, /*mustBeSync=*/true);
+            runEdit(context, [&](TfEditCookie ec) { resumed = reclaim(ec, context); });
         }
         resume_ = false;
-        debugLog(resumed ? "took the word back" : "could not take the word back");
-        if (!resumed && action == Action::Append && !injected()) {
-            // Apps like KakaoTalk commit every key and do not let us read the text back. Erase what they
-            // committed and re-send this key; it then arrives with the whole word still in the engine.
-            const size_t count = toUtf16(orphan_).size();
-            orphan_.clear();
-            pendingErase_ = static_cast<int>(count);
-            retypeKey_ = wParam;
-            retypeAt_ = GetTickCount();
-            queued_.clear();
-            debugLog("erasing the committed word and typing it again");
-            retyping_ = retype(count, wParam);
-            if (retyping_) {
-                *eaten = TRUE;
-                return S_OK;
-            }
-            // Windows refused the injected keys (e.g. an elevated window): fall back to a new word.
-            pendingErase_ = 0;
-            debugLog("re-type refused");
-        }
         orphan_.clear();
-        // Could not take the word back for another reason: start a fresh word.
+        // Could not take the word back (the app moved the caret or changed the text): start fresh.
+        debugLog(resumed ? "took the word back" : "could not take the word back");
         if (!resumed) engine_.commit();
-    }
-    if (action == Action::Queue) {
-        char queuedLetter = 0;
-        const Action real = classify(wParam, &queuedLetter, /*ignoreRetype=*/true);
-        queued_.push_back({real, queuedLetter, wParam});
-        debugLog("queued a key typed during re-type");
-        return S_OK;
-    }
-    if (retyping_ && action == Action::Append) {
-        // Our re-sent key: add it and every key the user typed meanwhile, then draw once.
-        retyping_ = false;
-        engine_.append(letter);
-        std::vector<Queued> pending;
-        pending.swap(queued_);
-        for (const Queued& item : pending) {
-            if (item.action == Action::Append) engine_.append(item.letter);
-            else apply(context, item.action, item.letter, item.key);
-        }
-        if (!engine_.empty()) show(context);
-        return S_OK;
-    }
-    apply(context, action, letter, wParam);
-    return S_OK;
-}
-
-// Runs one key's action. Besides OnKeyDown, it replays keys held back during a re-type; such a key was
-// eaten, so one that would normally go to the app is ended into the word or re-sent here.
-void TextService::apply(ITfContext* context, Action action, char letter, WPARAM wParam) {
-    if (action == Action::Pass) {
-        if (!engine_.empty()) action = Action::CommitThenPass;
-        else {
-            resend(wParam);
-            return;
-        }
     }
     switch (action) {
         case Action::Pass:
         case Action::Swallow:
-        case Action::Queue:
             break;
         case Action::Append:
             engine_.append(letter);
-            show(context);
+            runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
             break;
         case Action::Backspace:
             engine_.backspace();
-            if (engine_.empty()) runEdit(context, [this, context](TfEditCookie ec) { endComposition(ec, context, U""); });
-            else show(context);
+            if (engine_.empty()) runEdit(context, [&](TfEditCookie ec) { endComposition(ec, context, U""); });
+            else runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
             break;
         case Action::Toggle:
             engine_.toggleLanguage();
-            show(context);
+            runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
             break;
         case Action::CommitSpace:
             commitNow(context, U" ");
             break;
         case Action::CommitThenPass:
-            commitNow(context, U"", wParam);
+            commitNow(context, U"");
+            resend(wParam);
             break;
     }
+    return S_OK;
 }
 
 STDMETHODIMP TextService::OnCompositionTerminated(TfEditCookie, ITfComposition*) {
@@ -487,30 +389,12 @@ bool TextService::reclaim(TfEditCookie ec, ITfContext* context) {
     return ok;
 }
 
-// Edits run synchronously when the app allows it. Excel refuses synchronous locks while it handles a key,
-// which used to drop every on-screen update until the word was committed; those now run as soon as the
-// app grants the lock. Bodies must therefore capture by value (see show/commitNow).
-void TextService::runEdit(ITfContext* context, std::function<void(TfEditCookie)> body, bool mustBeSync) {
+void TextService::runEdit(ITfContext* context, std::function<void(TfEditCookie)> body) {
     if (!context) return;
-    context->AddRef();
-    auto* session = new EditSession([context, body = std::move(body)](TfEditCookie ec) {
-        body(ec);
-        context->Release();
-    });
+    auto* session = new EditSession(std::move(body));
     HRESULT result = S_OK;
-    HRESULT hr = context->RequestEditSession(clientId_, session, TF_ES_SYNC | TF_ES_READWRITE, &result);
-    if (!mustBeSync && (FAILED(hr) || result == TF_E_SYNCHRONOUS)) {
-        debugLog("sync edit refused; queued");
-        hr = context->RequestEditSession(clientId_, session, TF_ES_ASYNC | TF_ES_READWRITE, &result);
-    }
-    // The session never ran, so drop the reference its body would have released.
-    if (FAILED(hr) || (mustBeSync && result == TF_E_SYNCHRONOUS)) context->Release();
+    context->RequestEditSession(clientId_, session, TF_ES_SYNC | TF_ES_READWRITE, &result);
     session->Release();
-}
-
-void TextService::show(ITfContext* context) {
-    std::u32string text = engine_.text();
-    runEdit(context, [this, context, text](TfEditCookie ec) { showText(ec, context, text); });
 }
 
 void TextService::showText(TfEditCookie ec, ITfContext* context, const std::u32string& text) {
@@ -552,13 +436,9 @@ void TextService::endComposition(TfEditCookie ec, ITfContext* context, const std
     composition_ = nullptr;
 }
 
-void TextService::commitNow(ITfContext* context, const std::u32string& extra, WPARAM thenKey) {
+void TextService::commitNow(ITfContext* context, const std::u32string& extra) {
     std::u32string text = engine_.commit() + extra;
-    // The held-back key is re-sent only after the word is in the document, even when the edit is queued.
-    runEdit(context, [this, context, text, thenKey](TfEditCookie ec) {
-        endComposition(ec, context, text);
-        if (thenKey) resend(thenKey);
-    });
+    runEdit(context, [&](TfEditCookie ec) { endComposition(ec, context, text); });
 }
 
 }  // namespace autotype

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <functional>
-#include <vector>
 
 #include "Globals.h"
 
@@ -38,15 +37,13 @@ public:
     STDMETHODIMP OnChange(REFGUID compartment) override;
 
 private:
-    enum class Action { Pass, Swallow, Queue, Append, Backspace, Toggle, CommitSpace, CommitThenPass };
-    Action classify(WPARAM key, char* letter, bool ignoreRetype = false) const;
-    void apply(ITfContext* context, Action action, char letter, WPARAM key);
+    enum class Action { Pass, Swallow, Append, Backspace, Toggle, CommitSpace, CommitThenPass };
+    Action classify(WPARAM key, char* letter) const;
 
-    void runEdit(ITfContext* context, std::function<void(TfEditCookie)> body, bool mustBeSync = false);
-    void show(ITfContext* context);
+    void runEdit(ITfContext* context, std::function<void(TfEditCookie)> body);
     void showText(TfEditCookie ec, ITfContext* context, const std::u32string& text);
     void endComposition(TfEditCookie ec, ITfContext* context, const std::u32string& finalText);
-    void commitNow(ITfContext* context, const std::u32string& extra, WPARAM thenKey = 0);
+    void commitNow(ITfContext* context, const std::u32string& extra);
     bool reclaim(TfEditCookie ec, ITfContext* context);
     void announceKoreanMode();
     void watchCompartments(bool on);
@@ -59,14 +56,6 @@ private:
     // already in the document; the next letter takes it back so the word keeps being judged as one.
     bool resume_ = false;
     std::u32string orphan_;
-    int pendingErase_ = 0;  // Backspaces we injected that the app has not received yet
-    // While a re-type is in flight, keys the user already typed arrive before ours. They wait here and
-    // run, in order, right after our re-sent key, so fast typing cannot split a word (ㅈ기 for 지금).
-    bool retyping_ = false;
-    WPARAM retypeKey_ = 0;
-    DWORD retypeAt_ = 0;
-    struct Queued { Action action; char letter; WPARAM key; };
-    std::vector<Queued> queued_;
     DWORD openCookie_ = TF_INVALID_COOKIE;
     DWORD modeCookie_ = TF_INVALID_COOKIE;
     Engine engine_;
