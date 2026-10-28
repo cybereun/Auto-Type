@@ -41,6 +41,19 @@ int main(int argc, char** argv) {
     expect(model, "github", U"github");
     expect(model, "test123", U"test123");
     expect(model, "tkfkd", U"사랑");
+    expect(model, "ehldjdigo", U"되어야해");
+    expect(model, "go", U"go");
+    expect(model, "a", U"a");
+    expect(model, "the", U"the");
+
+    // Words start in Korean: the first key shows a jamo, not a Latin letter.
+    for (std::string first : {"d", "t", "e", "r"}) {
+        Engine e(model);
+        e.append(first[0]);
+        bool korean = !e.text().empty() && e.text()[0] >= 0x3131 && e.text()[0] <= 0x3163;
+        if (!korean) ++failures;
+        std::cout << (korean ? "ok   " : "FAIL ") << "first key " << first << " -> " << toUtf8(e.text()) << "\n";
+    }
 
     Engine engine(model);
     for (char k : std::string("dkssud")) engine.append(k);

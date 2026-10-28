@@ -253,6 +253,14 @@
         const ko = this.candidates.find((c) => isKoreanOnly(c.text) && isPlausibleKorean(c.text));
         if (ko) chosen = ko;
       }
+      // Korean first: keys that are not a known English word read as Korean while still plausible.
+      if (chosen && !hasSyllable(chosen.text) && !isKoreanOnly(chosen.text) && !isStructuredLatin(this.raw) &&
+          !isAcronym(this.raw) &&
+          (this.model.english(this.raw).tier === 0 || (this.raw.length === 1 && !"aAI".includes(this.raw)))) {
+        const ko = compose(this.raw);
+        const starting = jamoCount(ko) === ko.length && ko.length <= 2;
+        if (isKoreanOnly(ko) && (isPlausibleKorean(ko) || starting)) { this.text = ko; return; }
+      }
       this.text = chosen ? chosen.text : this.raw;
     }
     append(key) { if (this.raw.length < 64) { this.raw += key; this.refresh(); } }

@@ -459,6 +459,19 @@ void Engine::refresh() {
         for (auto& c : candidates_)
             if (isKoreanOnly(c.text) && isPlausibleKorean(c.text)) { chosen = &c; break; }
     }
+    // Korean first: a run of keys that is not a known English word reads as Korean while it is still
+    // plausible Korean (ㅇ, 아, 되어얗), so words start in Korean instead of flashing English.
+    if (chosen && !hasSyllable(chosen->text) && !isKoreanOnly(chosen->text) && !isStructuredLatin(raw_) &&
+        !isAcronym(raw_) &&
+        (model_.englishEvidence(raw_).tier == Model::Tier::Unknown ||
+         (raw_.size() == 1 && std::string("aAI").find(raw_[0]) == std::string::npos))) {
+        const std::u32string korean = hangul::compose(raw_);
+        const bool startingKorean = hangul::jamoCount(korean) == static_cast<int>(korean.size()) && korean.size() <= 2;
+        if (isKoreanOnly(korean) && (isPlausibleKorean(korean) || startingKorean)) {
+            text_ = korean;
+            return;
+        }
+    }
     text_ = chosen ? chosen->text : fromAscii(raw_);
 }
 

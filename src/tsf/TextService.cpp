@@ -1,5 +1,6 @@
 #include "TextService.h"
 
+#include <algorithm>
 #include <string>
 
 namespace autotype {
@@ -99,7 +100,32 @@ STDMETHODIMP TextService::ActivateEx(ITfThreadMgr* threadMgr, TfClientId clientI
         keystrokes->AdviseKeyEventSink(clientId_, static_cast<ITfKeyEventSink*>(this), TRUE);
         keystrokes->Release();
     }
+    announceKoreanMode();
     return S_OK;
+}
+
+// Tells Windows the IME is open and in Hangul mode. Without this, apps that ask the IMM32 status
+// (Excel, KakaoTalk) treat Auto-Type as "IME off" and take the first keys as plain letters.
+void TextService::announceKoreanMode() {
+    if (!threadMgr_) return;
+    ITfCompartmentMgr* compartments = nullptr;
+    if (FAILED(threadMgr_->QueryInterface(IID_ITfCompartmentMgr, reinterpret_cast<void**>(&compartments)))) return;
+    const struct { const GUID* id; LONG value; } values[] = {
+        {&GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, 1},
+        {&GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, TF_CONVERSIONMODE_NATIVE},
+    };
+    for (const auto& item : values) {
+        ITfCompartment* compartment = nullptr;
+        if (SUCCEEDED(compartments->GetCompartment(*item.id, &compartment))) {
+            VARIANT value;
+            VariantInit(&value);
+            value.vt = VT_I4;
+            value.lVal = item.value;
+            compartment->SetValue(clientId_, &value);
+            compartment->Release();
+        }
+    }
+    compartments->Release();
 }
 
 STDMETHODIMP TextService::Deactivate() {
@@ -117,14 +143,17 @@ STDMETHODIMP TextService::Deactivate() {
         composition_ = nullptr;
     }
     engine_.clear();
+    resume_ = false;
     clientId_ = TF_CLIENTID_NULL;
     return S_OK;
 }
 
 TextService::Action TextService::classify(WPARAM key, char* letter) const {
-    const bool composing = !engine_.empty();
+    const bool composing = !engine_.empty() && !resume_;
     const bool shift = down(VK_SHIFT);
-    if (key == VK_HANGUL || (key == VK_SPACE && shift)) return composing ? Action::Toggle : Action::Pass;
+    // Idle 한/영 key is swallowed: it would otherwise switch Windows to "IME off" and stop Auto-Type.
+    if (key == VK_HANGUL) return composing ? Action::Toggle : Action::Swallow;
+    if (key == VK_SPACE && shift) return composing ? Action::Toggle : Action::Pass;
     if (key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT || key == VK_CAPITAL) return Action::Pass;
     if (down(VK_CONTROL) || down(VK_MENU) || down(VK_LWIN) || down(VK_RWIN))
         return composing ? Action::CommitThenPass : Action::Pass;
@@ -133,7 +162,7 @@ TextService::Action TextService::classify(WPARAM key, char* letter) const {
         *letter = static_cast<char>(shift != caps ? key : key + 32);
         return Action::Append;
     }
-    if (key >= '0' && key <= '9' && !shift && composing) {
+    if (key >= '0' && key <= '9' && !shift && (composing || resume_)) {
         *letter = static_cast<char>(key);
         return Action::Append;
     }
@@ -143,7 +172,10 @@ TextService::Action TextService::classify(WPARAM key, char* letter) const {
     return Action::CommitThenPass;
 }
 
-STDMETHODIMP TextService::OnSetFocus(BOOL) { return S_OK; }
+STDMETHODIMP TextService::OnSetFocus(BOOL foreground) {
+    if (foreground) announceKoreanMode();
+    return S_OK;
+}
 
 STDMETHODIMP TextService::OnTestKeyDown(ITfContext*, WPARAM wParam, LPARAM, BOOL* eaten) {
     char letter = 0;
@@ -170,8 +202,19 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
     char letter = 0;
     const Action action = classify(wParam, &letter);
     *eaten = action != Action::Pass;
+    if (resume_) {
+        bool resumed = false;
+        if (action == Action::Append) {
+            runEdit(context, [&](TfEditCookie ec) { resumed = reclaim(ec, context); });
+        }
+        resume_ = false;
+        orphan_.clear();
+        // Could not take the word back (the app moved the caret or changed the text): start fresh.
+        if (!resumed) engine_.commit();
+    }
     switch (action) {
         case Action::Pass:
+        case Action::Swallow:
             break;
         case Action::Append:
             engine_.append(letter);
@@ -198,13 +241,48 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
 }
 
 STDMETHODIMP TextService::OnCompositionTerminated(TfEditCookie, ITfComposition*) {
-    // The app ended the word (click elsewhere, focus change): keep what is on screen.
+    // The app ended the word. Keep what is on screen, and remember it so that, if the next key
+    // continues the same word, the word is taken back instead of being split (되어야 + go).
     if (composition_) {
         composition_->Release();
         composition_ = nullptr;
     }
-    engine_.commit();
+    if (!engine_.empty()) {
+        orphan_ = engine_.text();
+        resume_ = !orphan_.empty();
+    }
     return S_OK;
+}
+
+// Restarts the composition over the word the app just committed, if it is still right before the caret.
+bool TextService::reclaim(TfEditCookie ec, ITfContext* context) {
+    const std::u16string expected = toUtf16(orphan_);
+    if (expected.empty() || expected.size() > 64) return false;
+    ITfInsertAtSelection* insert = nullptr;
+    ITfContextComposition* contextComposition = nullptr;
+    ITfRange* range = nullptr;
+    bool ok = false;
+    if (SUCCEEDED(context->QueryInterface(IID_ITfInsertAtSelection, reinterpret_cast<void**>(&insert))) &&
+        SUCCEEDED(insert->InsertTextAtSelection(ec, TF_IAS_QUERYONLY, nullptr, 0, &range))) {
+        LONG shifted = 0;
+        range->Collapse(ec, TF_ANCHOR_START);
+        if (SUCCEEDED(range->ShiftStart(ec, -static_cast<LONG>(expected.size()), &shifted, nullptr)) &&
+            -shifted == static_cast<LONG>(expected.size())) {
+            WCHAR buffer[65] = {};
+            ULONG got = 0;
+            if (SUCCEEDED(range->GetText(ec, 0, buffer, 64, &got)) && got == expected.size() &&
+                std::equal(expected.begin(), expected.end(), buffer) &&
+                SUCCEEDED(context->QueryInterface(IID_ITfContextComposition, reinterpret_cast<void**>(&contextComposition))) &&
+                SUCCEEDED(contextComposition->StartComposition(ec, range, static_cast<ITfCompositionSink*>(this), &composition_)) &&
+                composition_) {
+                ok = true;
+            }
+        }
+    }
+    if (contextComposition) contextComposition->Release();
+    if (range) range->Release();
+    if (insert) insert->Release();
+    return ok;
 }
 
 void TextService::runEdit(ITfContext* context, std::function<void(TfEditCookie)> body) {

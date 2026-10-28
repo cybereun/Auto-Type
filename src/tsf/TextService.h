@@ -33,18 +33,24 @@ public:
     STDMETHODIMP OnCompositionTerminated(TfEditCookie ec, ITfComposition* composition) override;
 
 private:
-    enum class Action { Pass, Append, Backspace, Toggle, CommitSpace, CommitThenPass };
+    enum class Action { Pass, Swallow, Append, Backspace, Toggle, CommitSpace, CommitThenPass };
     Action classify(WPARAM key, char* letter) const;
 
     void runEdit(ITfContext* context, std::function<void(TfEditCookie)> body);
     void showText(TfEditCookie ec, ITfContext* context, const std::u32string& text);
     void endComposition(TfEditCookie ec, ITfContext* context, const std::u32string& finalText);
     void commitNow(ITfContext* context, const std::u32string& extra);
+    bool reclaim(TfEditCookie ec, ITfContext* context);
+    void announceKoreanMode();
 
     LONG refs_ = 1;
     ITfThreadMgr* threadMgr_ = nullptr;
     TfClientId clientId_ = TF_CLIENTID_NULL;
     ITfComposition* composition_ = nullptr;
+    // Set when the app ended our composition mid-word (Excel, KakaoTalk do this). The word's text is
+    // already in the document; the next letter takes it back so the word keeps being judged as one.
+    bool resume_ = false;
+    std::u32string orphan_;
     Engine engine_;
 };
 
