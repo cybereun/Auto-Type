@@ -40,10 +40,11 @@ private:
     enum class Action { Pass, Swallow, Append, Backspace, Toggle, CommitSpace, CommitThenPass };
     Action classify(WPARAM key, char* letter) const;
 
-    void runEdit(ITfContext* context, std::function<void(TfEditCookie)> body);
+    void runEdit(ITfContext* context, std::function<void(TfEditCookie)> body, bool mustBeSync = false);
+    void show(ITfContext* context);
     void showText(TfEditCookie ec, ITfContext* context, const std::u32string& text);
     void endComposition(TfEditCookie ec, ITfContext* context, const std::u32string& finalText);
-    void commitNow(ITfContext* context, const std::u32string& extra);
+    void commitNow(ITfContext* context, const std::u32string& extra, WPARAM thenKey = 0);
     bool reclaim(TfEditCookie ec, ITfContext* context);
     void announceKoreanMode();
     void watchCompartments(bool on);

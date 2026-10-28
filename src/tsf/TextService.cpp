@@ -275,7 +275,7 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
     if (resume_) {
         bool resumed = false;
         if (action == Action::Append) {
-            runEdit(context, [&](TfEditCookie ec) { resumed = reclaim(ec, context); });
+            runEdit(context, [&](TfEditCookie ec) { resumed = reclaim(ec, context); }, /*mustBeSync=*/true);
         }
         resume_ = false;
         debugLog(resumed ? "took the word back" : "could not take the word back");
@@ -300,23 +300,22 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
             break;
         case Action::Append:
             engine_.append(letter);
-            runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
+            show(context);
             break;
         case Action::Backspace:
             engine_.backspace();
-            if (engine_.empty()) runEdit(context, [&](TfEditCookie ec) { endComposition(ec, context, U""); });
-            else runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
+            if (engine_.empty()) runEdit(context, [this, context](TfEditCookie ec) { endComposition(ec, context, U""); });
+            else show(context);
             break;
         case Action::Toggle:
             engine_.toggleLanguage();
-            runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
+            show(context);
             break;
         case Action::CommitSpace:
             commitNow(context, U" ");
             break;
         case Action::CommitThenPass:
-            commitNow(context, U"");
-            resend(wParam);
+            commitNow(context, U"", wParam);
             break;
     }
     return S_OK;
@@ -429,12 +428,30 @@ bool TextService::reclaim(TfEditCookie ec, ITfContext* context) {
     return ok;
 }
 
-void TextService::runEdit(ITfContext* context, std::function<void(TfEditCookie)> body) {
+// Edits run synchronously when the app allows it. Excel refuses synchronous locks while it handles a key,
+// which used to drop every on-screen update until the word was committed; those now run as soon as the
+// app grants the lock. Bodies must therefore capture by value (see show/commitNow).
+void TextService::runEdit(ITfContext* context, std::function<void(TfEditCookie)> body, bool mustBeSync) {
     if (!context) return;
-    auto* session = new EditSession(std::move(body));
+    context->AddRef();
+    auto* session = new EditSession([context, body = std::move(body)](TfEditCookie ec) {
+        body(ec);
+        context->Release();
+    });
     HRESULT result = S_OK;
-    context->RequestEditSession(clientId_, session, TF_ES_SYNC | TF_ES_READWRITE, &result);
+    HRESULT hr = context->RequestEditSession(clientId_, session, TF_ES_SYNC | TF_ES_READWRITE, &result);
+    if (!mustBeSync && (FAILED(hr) || result == TF_E_SYNCHRONOUS)) {
+        debugLog("sync edit refused; queued");
+        hr = context->RequestEditSession(clientId_, session, TF_ES_ASYNC | TF_ES_READWRITE, &result);
+    }
+    // The session never ran, so drop the reference its body would have released.
+    if (FAILED(hr) || (mustBeSync && result == TF_E_SYNCHRONOUS)) context->Release();
     session->Release();
+}
+
+void TextService::show(ITfContext* context) {
+    std::u32string text = engine_.text();
+    runEdit(context, [this, context, text](TfEditCookie ec) { showText(ec, context, text); });
 }
 
 void TextService::showText(TfEditCookie ec, ITfContext* context, const std::u32string& text) {
@@ -476,9 +493,13 @@ void TextService::endComposition(TfEditCookie ec, ITfContext* context, const std
     composition_ = nullptr;
 }
 
-void TextService::commitNow(ITfContext* context, const std::u32string& extra) {
+void TextService::commitNow(ITfContext* context, const std::u32string& extra, WPARAM thenKey) {
     std::u32string text = engine_.commit() + extra;
-    runEdit(context, [&](TfEditCookie ec) { endComposition(ec, context, text); });
+    // The held-back key is re-sent only after the word is in the document, even when the edit is queued.
+    runEdit(context, [this, context, text, thenKey](TfEditCookie ec) {
+        endComposition(ec, context, text);
+        if (thenKey) resend(thenKey);
+    });
 }
 
 }  // namespace autotype
