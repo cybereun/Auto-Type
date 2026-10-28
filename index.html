@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auto-Type — 한/영 키 없이 쓰는 Windows 입력기</title>
+<meta name="description" content="한/영 전환 없이 그냥 치면 단어마다 한국어와 영어를 알아서 고르는 Windows 입력기. 브라우저에서 바로 체험해 보세요.">
+<meta property="og:title" content="Auto-Type — 한/영 키 없이 쓰는 Windows 입력기">
+<meta property="og:description" content="dkssudgktpdy → 안녕하세요. 단어마다 한국어와 영어를 알아서 고릅니다.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f6f5f1; --surface: #ffffff; --ink: #17171a; --muted: #5d5d66; --line: #e2e0d8;
+  --accent: #2f5bff; --accent-soft: #e6ecff; --ko: #e5484d; --en: #2f5bff; --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --sans: "IBM Plex Sans KR", system-ui, sans-serif; --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #111114; --surface: #1a1a1f; --ink: #f1f0ec; --muted: #a2a2ad; --line: #2c2c34;
+    --accent: #7d97ff; --accent-soft: #1f2645; --ko: #ff7b7f; --en: #7d97ff; }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+nav { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; }
+.logo { font-weight: 700; font-size: 18px; color: var(--ink); display: flex; gap: 8px; align-items: center; }
+.logo b { font-family: var(--mono); background: var(--ink); color: var(--bg); border-radius: 6px; padding: 1px 7px; font-size: 14px; }
+nav .links { display: flex; gap: 20px; font-size: 14px; }
+nav .links a { color: var(--muted); }
+
+.hero { padding: 64px 0 40px; text-align: center; }
+.hero h1 { font-size: clamp(32px, 6vw, 58px); line-height: 1.15; margin: 0 0 18px; letter-spacing: -0.02em; }
+.hero p.lead { font-size: clamp(16px, 2.2vw, 19px); color: var(--muted); margin: 0 auto 32px; max-width: 620px; }
+.morph { font-family: var(--mono); font-size: clamp(22px, 4.5vw, 40px); height: 1.6em; margin: 0 0 34px; display: flex; justify-content: center; align-items: center; gap: 14px; flex-wrap: wrap; }
+.morph .keys { color: var(--muted); }
+.morph .arrow { color: var(--muted); font-size: .7em; }
+.morph .out { font-family: var(--sans); font-weight: 700; border-bottom: 3px solid var(--accent); min-width: 2ch; }
+.cta { display: inline-flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 22px; border-radius: 999px; font-weight: 600; font-size: 15px; border: 1px solid var(--line); color: var(--ink); background: var(--surface); cursor: pointer; }
+.btn:hover { text-decoration: none; border-color: var(--muted); }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.small { font-size: 13px; color: var(--muted); margin-top: 14px; }
+
+section { padding: 56px 0; }
+h2 { font-size: clamp(24px, 3.6vw, 34px); margin: 0 0 10px; letter-spacing: -0.01em; }
+.sub { color: var(--muted); margin: 0 0 28px; }
+
+/* playground */
+.play { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.play-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); gap: 10px; flex-wrap: wrap; }
+.dots { display: flex; gap: 6px; } .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--line); display: block; }
+.editor { position: relative; min-height: 150px; padding: 20px; font-size: 22px; cursor: text; word-break: break-all; }
+.editor .placeholder { color: var(--muted); }
+.editor .comp { border-bottom: 2px solid var(--accent); background: var(--accent-soft); border-radius: 3px; }
+.caret { display: inline-block; width: 2px; height: 1.1em; background: var(--ink); vertical-align: -0.15em; animation: blink 1s steps(1) infinite; }
+.editor:not(.focused) .caret { visibility: hidden; }
+@keyframes blink { 50% { opacity: 0; } }
+#sink { position: absolute; opacity: 0; left: 0; top: 0; width: 1px; height: 1px; border: 0; padding: 0; }
+.inspect { display: grid; grid-template-columns: 1fr 1.4fr; border-top: 1px solid var(--line); }
+.inspect > div { padding: 16px; }
+.inspect > div + div { border-left: 1px solid var(--line); }
+.label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+.raw { font-family: var(--mono); font-size: 18px; min-height: 28px; }
+.raw kbd { display: inline-block; border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 6px; padding: 0 7px; margin: 0 3px 4px 0; font-family: var(--mono); font-size: 15px; background: var(--bg); }
+.cand { display: grid; grid-template-columns: minmax(70px, auto) 1fr 48px; gap: 10px; align-items: center; font-size: 15px; margin-bottom: 8px; }
+.cand .t { font-weight: 600; }
+.cand .bar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.cand .bar i { display: block; height: 100%; border-radius: 99px; background: var(--en); transition: width .25s ease; }
+.cand.ko .bar i { background: var(--ko); }
+.cand .p { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; }
+.cand .why { grid-column: 1 / -1; font-size: 12px; color: var(--muted); margin-top: -6px; }
+.empty { color: var(--muted); font-size: 14px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 0; }
+.chip { font-family: var(--mono); font-size: 13px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+.tools { display: flex; gap: 8px; }
+.tools button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+.warn { display: none; padding: 10px 16px; font-size: 13px; background: #fff4d6; color: #6b4e00; border-top: 1px solid var(--line); }
+@media (prefers-color-scheme: dark) { .warn { background: #3a2f10; color: #ffe3a0; } }
+
+/* compare */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
+.card h3 { margin: 0 0 6px; font-size: 17px; }
+.card .meta { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+.steps { font-family: var(--mono); font-size: 14px; display: grid; gap: 6px; }
+.steps div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px dashed var(--line); padding-bottom: 6px; }
+.steps .bad { color: var(--ko); } .steps .good { color: var(--accent); }
+.count { margin-top: 14px; font-size: 28px; font-weight: 700; }
+.count span { font-size: 14px; color: var(--muted); font-weight: 400; }
+
+/* features */
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.feat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+.feat .ex { font-family: var(--mono); font-size: 13px; color: var(--muted); background: var(--bg); border-radius: 8px; padding: 6px 10px; margin-bottom: 12px; display: inline-block; }
+.feat h3 { margin: 0 0 6px; font-size: 16px; }
+.feat p { margin: 0; color: var(--muted); font-size: 14px; }
+
+/* how */
+.flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; counter-reset: s; }
+.flow div { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; font-size: 14px; color: var(--muted); }
+.flow div::before { counter-increment: s; content: counter(s); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: var(--bg); font-weight: 700; font-size: 13px; margin-bottom: 10px; }
+.flow b { color: var(--ink); display: block; margin-bottom: 4px; }
+
+/* install */
+.install { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
+ol.big { margin: 0; padding-left: 20px; } ol.big li { margin-bottom: 12px; }
+kbd.k { font-family: var(--mono); font-size: 13px; border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 6px; padding: 1px 7px; background: var(--bg); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+td { padding: 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td:first-child { white-space: nowrap; padding-right: 14px; }
+
+footer { border-top: 1px solid var(--line); padding: 30px 0 50px; color: var(--muted); font-size: 14px; }
+footer .row { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+
+@media (max-width: 820px) {
+  .grid, .flow { grid-template-columns: 1fr 1fr; }
+  .compare, .install, .inspect { grid-template-columns: 1fr; }
+  .inspect > div + div { border-left: 0; border-top: 1px solid var(--line); }
+  nav .links a:not(.gh) { display: none; }
+}
+@media (max-width: 520px) { .grid, .flow { grid-template-columns: 1fr; } .editor { font-size: 19px; } }
+@media (prefers-reduced-motion: reduce) { .caret { animation: none; } .cand .bar i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="logo" href="#"><b>가A</b> Auto-Type</a>
+    <div class="links">
+      <a href="#try">체험하기</a><a href="#features">기능</a><a href="#install">설치</a>
+      <a class="gh" href="https://github.com/cybereun/Auto-Type">GitHub</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <h1>한/영 키를<br>잊어버리세요</h1>
+    <p class="lead">그냥 치면 Auto-Type이 단어마다 한국어인지 영어인지 알아서 고릅니다. Windows 정식 입력기라 메모장, 브라우저, 메신저 어디서나 씁니다.</p>
+    <div class="morph" aria-live="polite"><span class="keys" id="mKeys">dkssud</span><span class="arrow">→</span><span class="out" id="mOut">안녕</span></div>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/cybereun/Auto-Type/releases/latest">Windows용 받기</a>
+      <a class="btn" href="#try">브라우저에서 써 보기</a>
+    </div>
+    <div class="small">Windows 10 · 11 &nbsp;·&nbsp; 무료 · MIT &nbsp;·&nbsp; 인터넷 연결 없이 동작</div>
+  </header>
+</div>
+
+<section id="try">
+  <div class="wrap">
+    <h2>직접 쳐 보세요</h2>
+    <p class="sub">아래 칸을 누르고 <b>영문 자판 상태로</b> 치세요. 실제 입력기와 같은 엔진과 언어 모델이 이 페이지에서 돌아갑니다.</p>
+    <div class="play">
+      <div class="play-head">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <span><kbd class="k">Space</kbd> 확정 · <kbd class="k">Shift</kbd>+<kbd class="k">Space</kbd> 한/영 뒤집기 · <kbd class="k">Backspace</kbd> 지우기</span>
+        <div class="tools"><button id="flip" type="button">한/영 뒤집기</button><button id="clear" type="button">지우기</button></div>
+      </div>
+      <div class="editor" id="editor" tabindex="-1">
+        <span id="committed"></span><span class="comp" id="comp"></span><span class="caret"></span>
+        <span class="placeholder" id="ph">여기를 누르고 dkssudgktpdy 를 쳐 보세요</span>
+        <textarea id="sink" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="입력"></textarea>
+      </div>
+      <div class="warn" id="warn">한글 자판 상태로 들어오고 있어요. Windows 한/영 키로 <b>영문 상태</b>로 바꾼 뒤 쳐 보세요.</div>
+      <div class="inspect">
+        <div><div class="label">누른 키</div><div class="raw" id="raw"><span class="empty">아직 없음</span></div></div>
+        <div><div class="label">엔진이 본 후보</div><div id="cands"><span class="empty">글자를 치면 한국어·영어 후보와 확률이 나옵니다</span></div></div>
+      </div>
+    </div>
+    <div class="chips" id="chips">
+      <button class="chip" data-k="dkssudgktpdy">dkssudgktpdy</button>
+      <button class="chip" data-k="APIfmf">APIfmf</button>
+      <button class="chip" data-k="hello world">hello world</button>
+      <button class="chip" data-k="ehoTsk">ehoTsk</button>
+      <button class="chip" data-k="githubdp tkfkd">githubdp tkfkd</button>
+      <button class="chip" data-k="test123">test123</button>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>"안녕 hello"를 칠 때</h2>
+    <p class="sub">한/영 키를 잘못 누른 상태에서 시작했다고 해 봅시다.</p>
+    <div class="compare">
+      <div class="card">
+        <h3>보통 입력기</h3>
+        <div class="meta">상태를 확인하고, 틀리면 지우고 다시</div>
+        <div class="steps">
+          <div><span>dkssud</span><span class="bad">dkssud ✗</span></div>
+          <div><span>⌫ × 6</span><span>지우기</span></div>
+          <div><span>한/영</span><span>전환</span></div>
+          <div><span>dkssud ␣</span><span>안녕</span></div>
+          <div><span>한/영</span><span>전환</span></div>
+          <div><span>hello</span><span>hello</span></div>
+        </div>
+        <div class="count">26 <span>번 누름</span></div>
+      </div>
+      <div class="card">
+        <h3>Auto-Type</h3>
+        <div class="meta">그냥 침</div>
+        <div class="steps">
+          <div><span>dkssud ␣</span><span class="good">안녕 ✓</span></div>
+          <div><span>hello</span><span class="good">hello ✓</span></div>
+        </div>
+        <div class="count">12 <span>번 누름 · 절반 이하</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <h2>똑똑하지만 조용하게</h2>
+    <p class="sub">설정할 것이 없습니다. 쓰던 대로 치면 됩니다.</p>
+    <div class="grid">
+      <div class="feat"><span class="ex">gksdudwjsghks → 한영전환</span><h3>단어별 자동 판단</h3><p>영어 철자 통계와 한글 음절 빈도로 두 가지 읽기를 비교해 더 자연스러운 쪽을 고릅니다.</p></div>
+      <div class="feat"><span class="ex">APIfmf → API를</span><h3>섞어 쓴 단어</h3><p>영어 단어 뒤에 붙은 조사를 알아봅니다. 개발 문서나 업무 메시지에 특히 편합니다.</p></div>
+      <div class="feat"><span class="ex">user_id · a.com · v2</span><h3>코드와 주소는 그대로</h3><p>URL, 이메일, 경로, snake_case, camelCase, 숫자가 섞인 단어는 영어로 둡니다.</p></div>
+      <div class="feat"><span class="ex">ehoTsk → 됐나</span><h3>쌍자음도 정확하게</h3><p>Shift + Q W E R T O P는 대문자가 아니라 ㅃ ㅉ ㄸ ㄲ ㅆ ㅒ ㅖ로 읽습니다.</p></div>
+      <div class="feat"><span class="ex">한/영 · Shift+Space</span><h3>틀리면 그 단어만</h3><p>판단이 틀렸다면 확정 전에 한/영 키를 한 번. 입력 중인 단어만 반대로 바뀝니다.</p></div>
+      <div class="feat"><span class="ex">0.2MB · 오프라인</span><h3>내 PC 안에서만</h3><p>판단은 DLL 안의 작은 모델로만 합니다. 입력한 글을 저장하거나 어디로도 보내지 않습니다.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>어떻게 고르나요</h2>
+    <p class="sub">키를 누를 때마다 아래 과정을 거쳐 화면을 다시 그립니다.</p>
+    <div class="flow">
+      <div><b>두 가지로 읽기</b>같은 키를 영어 그대로와 두벌식 한글로 각각 읽습니다.</div>
+      <div><b>점수 매기기</b>영어는 3글자 연속 확률, 한국어는 음절 사용 빈도로 점수를 냅니다.</div>
+      <div><b>단서 더하기</b>사전, 약어, URL, 앞 단어의 언어, 영어 + 조사 조합을 반영합니다.</div>
+      <div><b>가장 높은 쪽</b>점수를 확률로 바꿔 1등을 보여 줍니다. 위 체험판의 막대가 그 확률입니다.</div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>1분이면 설치</h2>
+    <p class="sub">기존 Microsoft 입력기는 그대로 둡니다. 언제든 돌아갈 수 있습니다.</p>
+    <div class="install">
+      <div class="card">
+        <ol class="big">
+          <li><a href="https://github.com/cybereun/Auto-Type/releases/latest">Releases</a>에서 <b>AutoType-Setup.exe</b>를 받습니다.</li>
+          <li>실행하고 관리자 권한 요청에 <b>예</b>를 누릅니다. SmartScreen이 막으면 <b>추가 정보 → 실행</b>.</li>
+          <li><kbd class="k">Win</kbd> + <kbd class="k">Space</kbd>로 <b>Auto-Type (한영 자동)</b>을 고릅니다.</li>
+          <li>이미 열려 있던 앱은 다시 실행하면 끝입니다.</li>
+        </ol>
+        <p style="margin:18px 0 0"><a class="btn primary" href="https://github.com/cybereun/Auto-Type/releases/latest">최신 버전 받기</a></p>
+      </div>
+      <div class="card">
+        <table>
+          <tr><td><kbd class="k">Win</kbd>+<kbd class="k">Space</kbd></td><td>Microsoft 입력기 ⇄ Auto-Type</td></tr>
+          <tr><td>한/영 키</td><td>입력 중인 단어만 뒤집기</td></tr>
+          <tr><td><kbd class="k">Space</kbd></td><td>확정하고 띄어쓰기</td></tr>
+          <tr><td>Enter · Tab · Esc</td><td>확정하고 키를 그대로 전달</td></tr>
+          <tr><td>제거</td><td>설정 → 앱 → Auto-Type → 제거</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap row">
+    <div>만든 사람 <a href="https://github.com/cybereun">@cybereun</a> · <a href="https://github.com/cybereun/Auto-Type/issues">버그 제보</a> · <a href="https://github.com/cybereun/Auto-Type">소스 코드</a></div>
+    <div>판단 로직과 모델: <a href="https://github.com/3x-haust/tavi">Tavi</a> (MIT) · Auto-Type MIT License</div>
+  </div>
+</footer>
+
+<script src="engine.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const editor = $("editor"), sink = $("sink"), committedEl = $("committed"), compEl = $("comp");
+  const rawEl = $("raw"), candsEl = $("cands"), ph = $("ph"), warn = $("warn");
+  let engine = null, committed = "";
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function render() {
+    committedEl.textContent = committed;
+    compEl.textContent = engine ? engine.text : "";
+    ph.style.display = committed || (engine && engine.raw) ? "none" : "";
+    if (!engine || !engine.raw) {
+      rawEl.innerHTML = '<span class="empty">아직 없음</span>';
+      candsEl.innerHTML = '<span class="empty">글자를 치면 한국어·영어 후보와 확률이 나옵니다</span>';
+      return;
+    }
+    rawEl.innerHTML = [...engine.raw].map((k) => "<kbd>" + k + "</kbd>").join("");
+    const list = engine.candidates.slice(0, 4);
+    if (engine.lock) {
+      candsEl.innerHTML = '<span class="empty">직접 ' + (engine.lock === "ko" ? "한국어" : "영어") + "로 고정했습니다</span>";
+      return;
+    }
+    candsEl.innerHTML = list.map((c) => {
+      const ko = /[가-힣ㄱ-ㅣ]/.test(c.text);
+      const pct = Math.round(c.confidence * 100);
+      const t = document.createElement("span"); t.textContent = c.text;
+      return '<div class="cand' + (ko ? " ko" : "") + '"><span class="t">' + t.innerHTML + '</span><span class="bar"><i style="width:' + pct +
+        '%"></i></span><span class="p">' + pct + '%</span><span class="why">' + c.why + "</span></div>";
+    }).join("");
+  }
+
+  function key(k) {
+    if (!engine) return;
+    if (/^[A-Za-z]$/.test(k) || (/^[0-9]$/.test(k) && engine.raw)) engine.append(k);
+    else if (k === " ") committed += engine.commit() + " ";
+    else if (k === "\n") committed += engine.commit() + "\n";
+    else { committed += engine.commit() + k; }
+    render();
+  }
+  function backspace() {
+    if (engine && engine.raw) engine.backspace(); else committed = committed.slice(0, -1);
+    render();
+  }
+  function flip() { if (engine) { engine.toggle(); render(); } }
+
+  editor.addEventListener("mousedown", (e) => { e.preventDefault(); sink.focus(); });
+  sink.addEventListener("focus", () => editor.classList.add("focused"));
+  sink.addEventListener("blur", () => editor.classList.remove("focused"));
+  sink.addEventListener("keydown", (e) => {
+    if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === " " && e.shiftKey) { e.preventDefault(); flip(); return; }
+    if (e.key === "HangulMode" || e.key === "Lang1") { e.preventDefault(); flip(); return; }
+    if (e.key === "Backspace") { e.preventDefault(); backspace(); return; }
+    if (e.key === "Enter") { e.preventDefault(); key("\n"); return; }
+    if (e.key.length === 1) { e.preventDefault(); warn.style.display = "none"; key(e.key); }
+  });
+  // Phones and OS IMEs that skip keydown arrive here instead.
+  sink.addEventListener("input", (e) => {
+    const text = sink.value; sink.value = "";
+    if (/[가-힣ㄱ-ㅣ]/.test(text)) { warn.style.display = "block"; return; }
+    if (e.inputType === "deleteContentBackward") { backspace(); return; }
+    for (const ch of text) key(ch);
+  });
+  $("flip").addEventListener("click", () => { flip(); sink.focus(); });
+  $("clear").addEventListener("click", () => { committed = ""; if (engine) engine.clear(); render(); sink.focus(); });
+
+  let playing = 0;
+  $("chips").addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip"); if (!chip || !engine) return;
+    const run = ++playing;
+    committed = ""; engine.clear(); render();
+    const keys = [...chip.dataset.k, " "];
+    let i = 0;
+    (function step() {
+      if (run !== playing || i >= keys.length) return;
+      key(keys[i++]);
+      setTimeout(step, reduce ? 0 : 90);
+    })();
+  });
+
+  // Hero: type a sample, show the live decision, then move on.
+  const samples = ["dkssudgktpdy", "APIfmf", "hello", "gksdudwjsghks", "ehoTsk", "github"];
+  function hero(model) {
+    const mKeys = $("mKeys"), mOut = $("mOut");
+    let s = 0;
+    function word() {
+      const e = new AutoType.Engine(model), keys = samples[s++ % samples.length];
+      let i = 0;
+      (function step() {
+        if (i < keys.length) { e.append(keys[i++]); mKeys.textContent = e.raw; mOut.textContent = e.text; setTimeout(step, 110); }
+        else setTimeout(word, 1800);
+      })();
+    }
+    if (!reduce) word();
+  }
+
+  fetch("model-v2.dat").then((r) => r.arrayBuffer()).then((buf) => {
+    const model = new AutoType.Model(buf);
+    engine = new AutoType.Engine(model);
+    render(); hero(model);
+  }).catch(() => { ph.textContent = "언어 모델을 불러오지 못했습니다. 새로고침해 주세요."; });
+})();
+</script>
+</body>
+</html>
