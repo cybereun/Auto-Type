@@ -1,0 +1,2 @@
+// The language model is embedded so the input method is a single DLL.
+101 RCDATA "../../resources/model-v2.dat"
