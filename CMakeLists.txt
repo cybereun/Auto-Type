@@ -16,16 +16,15 @@ add_executable(engine_test tests/engine_test.cpp)
 target_link_libraries(engine_test PRIVATE autotype_core)
 
 if(WIN32)
+  configure_file(src/tsf/AutoType.rc.in ${CMAKE_CURRENT_BINARY_DIR}/AutoType.rc @ONLY)
   add_library(AutoType SHARED
     src/tsf/Dll.cpp
     src/tsf/TextService.cpp
-    src/tsf/AutoType.rc
+    ${CMAKE_CURRENT_BINARY_DIR}/AutoType.rc
     src/tsf/AutoType.def)
   set_target_properties(AutoType PROPERTIES PREFIX "")
   target_link_libraries(AutoType PRIVATE autotype_core ole32 uuid advapi32 user32)
   target_compile_definitions(AutoType PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
-  configure_file(src/tsf/Version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/Version.h)
-  target_include_directories(AutoType PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
   if(MSVC)
     target_compile_options(AutoType PRIVATE /utf-8)
     target_compile_options(autotype_core PRIVATE /utf-8)
