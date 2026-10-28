@@ -1,6 +1,7 @@
 #include "TextService.h"
 
 #include <algorithm>
+#include <vector>
 #include <string>
 
 namespace autotype {
@@ -79,6 +80,31 @@ void resend(WPARAM key) {
     }
     inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
     SendInput(2, inputs, sizeof(INPUT));
+}
+
+// Marks keys we inject ourselves so the key sink can tell them from the user's typing.
+constexpr ULONG_PTR kInjected = 0x41545950;  // "ATYP"
+
+bool injected() { return static_cast<ULONG_PTR>(GetMessageExtraInfo()) == kInjected; }
+
+// Erases `count` characters before the caret, then re-sends `key`, all as one ordered input batch.
+void retype(size_t count, WPARAM key) {
+    std::vector<INPUT> inputs;
+    auto push = [&](WORD vk, DWORD flags) {
+        INPUT input = {};
+        input.type = INPUT_KEYBOARD;
+        input.ki.wVk = vk;
+        input.ki.dwFlags = flags;
+        input.ki.dwExtraInfo = kInjected;
+        inputs.push_back(input);
+    };
+    for (size_t i = 0; i < count; ++i) {
+        push(VK_BACK, 0);
+        push(VK_BACK, KEYEVENTF_KEYUP);
+    }
+    push(static_cast<WORD>(key), 0);
+    push(static_cast<WORD>(key), KEYEVENTF_KEYUP);
+    SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
 }
 
 void moveCaretToEnd(TfEditCookie ec, ITfContext* context, ITfRange* range) {
@@ -187,6 +213,8 @@ STDMETHODIMP TextService::Deactivate() {
 }
 
 TextService::Action TextService::classify(WPARAM key, char* letter) const {
+    // Our own erase keys (see retype) go straight to the app.
+    if (key == VK_BACK && (pendingErase_ > 0 || injected())) return Action::Pass;
     const bool composing = !engine_.empty() && !resume_;
     const bool shift = down(VK_SHIFT);
     // Idle 한/영 key is swallowed: it would otherwise switch Windows to "IME off" and stop Auto-Type.
@@ -218,6 +246,7 @@ STDMETHODIMP TextService::OnSetFocus(BOOL foreground) {
 STDMETHODIMP TextService::OnTestKeyDown(ITfContext*, WPARAM wParam, LPARAM, BOOL* eaten) {
     char letter = 0;
     *eaten = classify(wParam, &letter) != Action::Pass;
+    if (wParam == VK_BACK && pendingErase_ > 0) --pendingErase_;
     char line[64];
     wsprintfA(line, "key 0x%02X eaten=%d composing=%d", static_cast<unsigned>(wParam), *eaten ? 1 : 0, engine_.empty() ? 0 : 1);
     debugLog(line);
@@ -249,9 +278,20 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
             runEdit(context, [&](TfEditCookie ec) { resumed = reclaim(ec, context); });
         }
         resume_ = false;
-        orphan_.clear();
-        // Could not take the word back (the app moved the caret or changed the text): start fresh.
         debugLog(resumed ? "took the word back" : "could not take the word back");
+        if (!resumed && action == Action::Append && !injected()) {
+            // Apps like KakaoTalk commit every key and do not let us read the text back. Erase what they
+            // committed and re-send this key; it then arrives with the whole word still in the engine.
+            const size_t count = toUtf16(orphan_).size();
+            orphan_.clear();
+            pendingErase_ = static_cast<int>(count);
+            debugLog("erasing the committed word and typing it again");
+            retype(count, wParam);
+            *eaten = TRUE;
+            return S_OK;
+        }
+        orphan_.clear();
+        // Could not take the word back for another reason: start a fresh word.
         if (!resumed) engine_.commit();
     }
     switch (action) {

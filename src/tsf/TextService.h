@@ -56,6 +56,7 @@ private:
     // already in the document; the next letter takes it back so the word keeps being judged as one.
     bool resume_ = false;
     std::u32string orphan_;
+    int pendingErase_ = 0;  // Backspaces we injected that the app has not received yet
     DWORD openCookie_ = TF_INVALID_COOKIE;
     DWORD modeCookie_ = TF_INVALID_COOKIE;
     Engine engine_;
