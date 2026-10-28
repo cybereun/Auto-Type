@@ -24,6 +24,7 @@ POINT lastClick{};
 HWND lastClickForeground=nullptr;
 HHOOK keyboardHook=nullptr, mouseHook=nullptr;
 HFONT textFont=nullptr, uiFont=nullptr, titleFont=nullptr, smallFont=nullptr, microFont=nullptr, buttonFont=nullptr;
+HICON brandIcon=nullptr;
 HANDLE monitorStop=nullptr, monitorThread=nullptr;
 SRWLOCK focusLock=SRWLOCK_INIT;
 struct FocusSnapshot { HWND foreground=nullptr, focus=nullptr; RECT bounds{}; bool writable=false; ULONGLONG checkedAt=0, epoch=0; };
@@ -299,18 +300,18 @@ void setEnabled(bool value) {
 }
 LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM l) {
     if(m==WM_CREATE) {
-        brandLabel=CreateWindowW(L"STATIC",L"Auto-Type",WS_CHILD|WS_VISIBLE,22,16,190,28,h,nullptr,nullptr,nullptr);
-        versionLabel=CreateWindowW(L"STATIC",L"v" AUTOTYPE_VERSION,WS_CHILD|WS_VISIBLE|SS_RIGHT,316,19,52,20,h,nullptr,nullptr,nullptr);
-        headingLabel=CreateWindowW(L"STATIC",L"한·영 자동 전환",WS_CHILD|WS_VISIBLE,22,58,340,30,h,nullptr,nullptr,nullptr);
-        descriptionLabel=CreateWindowW(L"STATIC",L"입력 중인 단어를 보고 자연스럽게 바꿔요",WS_CHILD|WS_VISIBLE,23,91,340,22,h,nullptr,nullptr,nullptr);
-        toggleButton=CreateWindowW(L"BUTTON",L"자동 입력 켜기",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,21,129,204,46,h,(HMENU)1,nullptr,nullptr);
-        CreateWindowW(L"BUTTON",L"대기 입력 취소",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,235,129,133,46,h,(HMENU)2,nullptr,nullptr);
+        brandLabel=CreateWindowW(L"STATIC",L"Auto-Type",WS_CHILD|WS_VISIBLE,84,20,210,29,h,nullptr,nullptr,nullptr);
+        versionLabel=CreateWindowW(L"STATIC",L"v" AUTOTYPE_VERSION,WS_CHILD|WS_VISIBLE|SS_RIGHT,316,25,52,20,h,nullptr,nullptr,nullptr);
+        headingLabel=CreateWindowW(L"STATIC",L"한·영 전환",WS_CHILD|WS_VISIBLE,85,51,205,19,h,nullptr,nullptr,nullptr);
+        descriptionLabel=CreateWindowW(L"STATIC",L"입력 중인 단어를 보고 자연스럽게 바꿔요",WS_CHILD|WS_VISIBLE,23,86,345,20,h,nullptr,nullptr,nullptr);
+        toggleButton=CreateWindowW(L"BUTTON",L"자동 입력 켜기",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,22,117,169,46,h,(HMENU)1,nullptr,nullptr);
+        CreateWindowW(L"BUTTON",L"대기 입력 취소",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,199,117,169,46,h,(HMENU)2,nullptr,nullptr);
         statusLabel=CreateWindowW(L"STATIC",L"꺼짐 · 시작하려면 버튼을 눌러주세요",WS_CHILD|WS_VISIBLE|SS_LEFT,47,187,313,30,h,nullptr,nullptr,nullptr);
-        helperLabel=CreateWindowW(L"STATIC",L"한/영 전환     Space 확정     Esc 취소",WS_CHILD|WS_VISIBLE|SS_CENTER,24,226,342,18,h,nullptr,nullptr,nullptr);
+        helperLabel=CreateWindowW(L"STATIC",L"한/영 전환  ·  Space 확정  ·  Esc 취소",WS_CHILD|WS_VISIBLE|SS_CENTER,24,226,342,18,h,nullptr,nullptr,nullptr);
         EnumChildWindows(h,[](HWND child, LPARAM font)->BOOL { SendMessageW(child,WM_SETFONT,(WPARAM)font,TRUE); return TRUE; },(LPARAM)uiFont);
         SendMessageW(brandLabel,WM_SETFONT,(WPARAM)titleFont,TRUE);
         SendMessageW(versionLabel,WM_SETFONT,(WPARAM)microFont,TRUE);
-        SendMessageW(headingLabel,WM_SETFONT,(WPARAM)titleFont,TRUE);
+        SendMessageW(headingLabel,WM_SETFONT,(WPARAM)microFont,TRUE);
         SendMessageW(descriptionLabel,WM_SETFONT,(WPARAM)smallFont,TRUE);
         SendMessageW(statusLabel,WM_SETFONT,(WPARAM)smallFont,TRUE);
         SendMessageW(helperLabel,WM_SETFONT,(WPARAM)microFont,TRUE);
@@ -321,6 +322,7 @@ LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM l) {
     }
     if(m==WM_PAINT) {
         PAINTSTRUCT ps{}; HDC dc=BeginPaint(h,&ps);
+        if(brandIcon) DrawIconEx(dc,22,20,brandIcon,48,48,0,nullptr,DI_NORMAL);
         RECT r{20,182,370,219}; COLORREF card=enabled?RGB(235,247,240):kStatusBg;
         HBRUSH brush=CreateSolidBrush(card); HPEN pen=CreatePen(PS_SOLID,1,card);
         HGDIOBJ oldBrush=SelectObject(dc,brush), oldPen=SelectObject(dc,pen);
@@ -337,7 +339,7 @@ LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM l) {
         HDC dc=(HDC)w; HWND control=(HWND)l;
         SetBkMode(dc,TRANSPARENT);
         if(control==statusLabel) SetTextColor(dc,enabled?RGB(42,120,82):kMuted);
-        else SetTextColor(dc,(control==brandLabel || control==headingLabel)?kInk:kMuted);
+        else SetTextColor(dc,control==brandLabel?kInk:(control==headingLabel?kBlue:kMuted));
         return (LRESULT)canvasBrush;
     }
     if(m==WM_DRAWITEM) { drawRoundedButton((DRAWITEMSTRUCT*)l); return TRUE; }
@@ -374,6 +376,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show) {
     smallFont=CreateFontW(-14,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
     microFont=CreateFontW(-12,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
     buttonFont=CreateFontW(-15,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,0,0,L"Malgun Gothic");
+    brandIcon=(HICON)LoadImageW(instance,MAKEINTRESOURCEW(201),IMAGE_ICON,48,48,LR_DEFAULTCOLOR);
     WNDCLASSW wc{}; wc.hInstance=instance; wc.lpszClassName=L"AutoTypePreviewWord"; wc.lpfnWndProc=previewProc; wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1); RegisterClassW(&wc);
     previewWindow=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,wc.lpszClassName,L"",WS_POPUP|WS_BORDER,0,0,380,52,nullptr,nullptr,instance,nullptr);
     wc.lpszClassName=L"AutoTypeStandaloneWindow"; wc.lpfnWndProc=windowProc; wc.hCursor=LoadCursorW(nullptr,IDC_ARROW); wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(201)); RegisterClassW(&wc);
@@ -397,6 +400,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show) {
     if(smallFont) DeleteObject(smallFont);
     if(microFont) DeleteObject(microFont);
     if(buttonFont) DeleteObject(buttonFont);
+    if(brandIcon) DestroyIcon(brandIcon);
     if(canvasBrush) DeleteObject(canvasBrush);
     if(monitorStop) SetEvent(monitorStop);
     DWORD monitorExit=monitorThread?WaitForSingleObject(monitorThread,2000):WAIT_OBJECT_0;

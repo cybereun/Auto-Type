@@ -1,10 +1,10 @@
-# Auto-Type v1.0.1
+# Auto-Type v1.0.2
 
 Windows에서 단어를 입력할 때 한글과 영어를 자동으로 판단하는 단독 실행형 도우미입니다. 입력 중인 단어는 별도 미리보기 창에 표시되고 스페이스 또는 Enter 등을 누르면 현재 입력창에 전달됩니다.
 
 ## 실행
 
-1. GitHub Releases의 `Auto-Type-1.0.1-Windows-x64.exe` 또는 설치 파일을 내려받습니다.
+1. GitHub Releases의 `Auto-Type-1.0.2-Windows-x64.exe` 또는 `Auto-Type-Setup-1.0.2.exe`를 내려받습니다.
 2. **자동 입력 켜기**를 누른 뒤 원하는 앱의 입력창에서 입력합니다.
 3. 앱을 종료하면 기능이 꺼집니다. Windows에 키보드 입력기로 설치하거나 시작 프로그램에 등록하지 않습니다.
 
@@ -35,7 +35,7 @@ build-x64/Release/engine_test.exe resources/model-v2.dat
 build-x64/Release/pending_word_test.exe resources/model-v2.dat
 ```
 
-`AutoTypePreview.exe`가 단독 실행 앱입니다. 저장소에 남아 있는 `src/tsf`는 이전 버전의 Windows 입력기 실험 코드이며, v1.0.1 배포 파일에는 포함하지 않습니다.
+`AutoTypePreview.exe`가 단독 실행 앱입니다. 저장소에 남아 있는 `src/tsf`는 이전 버전의 Windows 입력기 실험 코드이며, v1.0.2 배포 파일에는 포함하지 않습니다.
 
 ## 라이선스
 
