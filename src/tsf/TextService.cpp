@@ -88,7 +88,7 @@ constexpr ULONG_PTR kInjected = 0x41545950;  // "ATYP"
 bool injected() { return static_cast<ULONG_PTR>(GetMessageExtraInfo()) == kInjected; }
 
 // Erases `count` characters before the caret, then re-sends `key`, all as one ordered input batch.
-void retype(size_t count, WPARAM key) {
+bool retype(size_t count, WPARAM key) {
     std::vector<INPUT> inputs;
     auto push = [&](WORD vk, DWORD flags) {
         INPUT input = {};
@@ -104,7 +104,7 @@ void retype(size_t count, WPARAM key) {
     }
     push(static_cast<WORD>(key), 0);
     push(static_cast<WORD>(key), KEYEVENTF_KEYUP);
-    SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+    return SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT)) == inputs.size();
 }
 
 void moveCaretToEnd(TfEditCookie ec, ITfContext* context, ITfRange* range) {
@@ -212,9 +212,16 @@ STDMETHODIMP TextService::Deactivate() {
     return S_OK;
 }
 
-TextService::Action TextService::classify(WPARAM key, char* letter) const {
+TextService::Action TextService::classify(WPARAM key, char* letter, bool ignoreRetype) const {
     // Our own erase keys (see retype) go straight to the app.
     if (key == VK_BACK && (pendingErase_ > 0 || injected())) return Action::Pass;
+    if (retyping_ && !ignoreRetype) {
+        const bool modifier = key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT || key == VK_CAPITAL ||
+                              key == VK_CONTROL || key == VK_MENU;
+        if (modifier) return Action::Pass;
+        // Once our backspaces are through, the next key is the one we re-sent.
+        if (!(pendingErase_ == 0 && key == retypeKey_)) return Action::Queue;
+    }
     const bool composing = !engine_.empty() && !resume_;
     const bool shift = down(VK_SHIFT);
     // Idle 한/영 key is swallowed: it would otherwise switch Windows to "IME off" and stop Auto-Type.
@@ -243,7 +250,17 @@ STDMETHODIMP TextService::OnSetFocus(BOOL foreground) {
     return S_OK;
 }
 
-STDMETHODIMP TextService::OnTestKeyDown(ITfContext*, WPARAM wParam, LPARAM, BOOL* eaten) {
+STDMETHODIMP TextService::OnTestKeyDown(ITfContext* context, WPARAM wParam, LPARAM, BOOL* eaten) {
+    if (retyping_ && GetTickCount() - retypeAt_ > 500) {
+        // Our re-sent key never came back: stop holding keys and replay what was held.
+        debugLog("re-type timed out");
+        retyping_ = false;
+        pendingErase_ = 0;
+        engine_.commit();
+        std::vector<Queued> pending;
+        pending.swap(queued_);
+        for (const Queued& item : pending) apply(context, item.action, item.letter, item.key);
+    }
     char letter = 0;
     *eaten = classify(wParam, &letter) != Action::Pass;
     if (wParam == VK_BACK && pendingErase_ > 0) --pendingErase_;
@@ -285,18 +302,61 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
             const size_t count = toUtf16(orphan_).size();
             orphan_.clear();
             pendingErase_ = static_cast<int>(count);
+            retypeKey_ = wParam;
+            retypeAt_ = GetTickCount();
+            queued_.clear();
             debugLog("erasing the committed word and typing it again");
-            retype(count, wParam);
-            *eaten = TRUE;
-            return S_OK;
+            retyping_ = retype(count, wParam);
+            if (retyping_) {
+                *eaten = TRUE;
+                return S_OK;
+            }
+            // Windows refused the injected keys (e.g. an elevated window): fall back to a new word.
+            pendingErase_ = 0;
+            debugLog("re-type refused");
         }
         orphan_.clear();
         // Could not take the word back for another reason: start a fresh word.
         if (!resumed) engine_.commit();
     }
+    if (action == Action::Queue) {
+        char queuedLetter = 0;
+        const Action real = classify(wParam, &queuedLetter, /*ignoreRetype=*/true);
+        queued_.push_back({real, queuedLetter, wParam});
+        debugLog("queued a key typed during re-type");
+        return S_OK;
+    }
+    if (retyping_ && action == Action::Append) {
+        // Our re-sent key: add it and every key the user typed meanwhile, then draw once.
+        retyping_ = false;
+        engine_.append(letter);
+        std::vector<Queued> pending;
+        pending.swap(queued_);
+        for (const Queued& item : pending) {
+            if (item.action == Action::Append) engine_.append(item.letter);
+            else apply(context, item.action, item.letter, item.key);
+        }
+        if (!engine_.empty()) show(context);
+        return S_OK;
+    }
+    apply(context, action, letter, wParam);
+    return S_OK;
+}
+
+// Runs one key's action. Besides OnKeyDown, it replays keys held back during a re-type; such a key was
+// eaten, so one that would normally go to the app is ended into the word or re-sent here.
+void TextService::apply(ITfContext* context, Action action, char letter, WPARAM wParam) {
+    if (action == Action::Pass) {
+        if (!engine_.empty()) action = Action::CommitThenPass;
+        else {
+            resend(wParam);
+            return;
+        }
+    }
     switch (action) {
         case Action::Pass:
         case Action::Swallow:
+        case Action::Queue:
             break;
         case Action::Append:
             engine_.append(letter);
@@ -318,7 +378,6 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
             commitNow(context, U"", wParam);
             break;
     }
-    return S_OK;
 }
 
 STDMETHODIMP TextService::OnCompositionTerminated(TfEditCookie, ITfComposition*) {
