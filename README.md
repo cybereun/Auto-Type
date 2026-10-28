@@ -215,6 +215,8 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
+태그를 푸시할 수 없으면 **Actions → build → Run workflow**(release 체크)를 누르면 `VERSION` 값으로 태그와 릴리스가 만들어집니다.
+
 GitHub Actions가 x64·x86 DLL을 빌드하고 테스트를 돌린 뒤, `AutoType-Setup-0.2.0.exe`와 `portable.zip`을 Releases에 올립니다.
 
 ## 프로젝트 구조

@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "VERSION 파일의 버전으로 GitHub 릴리스 만들기"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -62,9 +67,11 @@ jobs:
           path: out/
 
       - name: GitHub Release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.release)
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.value }}
+          target_commitish: ${{ github.sha }}
           name: Auto-Type ${{ steps.version.outputs.value }}
           files: out/*
           body: |
