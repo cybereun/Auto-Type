@@ -2,9 +2,9 @@
 
 <p align="center">
   <a href="https://github.com/cybereun/Auto-Type/actions/workflows/build.yml"><img alt="Build" src="https://github.com/cybereun/Auto-Type/actions/workflows/build.yml/badge.svg"></a>
-  <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&logoColor=white">
-  <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white">
-  <a href="https://github.com/cybereun/Auto-Type/releases"><img alt="Releases" src="https://img.shields.io/github/v/release/cybereun/Auto-Type?include_prereleases"></a>
+  <img alt="Windows 10 and 11" src="https://img.shields.io/badge/platform-Windows_10%20and%2011-0078D6">
+  <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C">
+  <a href="https://github.com/cybereun/Auto-Type/releases"><img alt="GitHub Releases" src="https://img.shields.io/badge/GitHub-Releases-181717"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-yellow"></a>
   <a href="https://github.com/cybereun"><img alt="Developer: cybereun" src="https://img.shields.io/badge/developer-cybereun-181717?logo=github"></a>
 </p>
