@@ -13,6 +13,9 @@ using namespace autotype;
 namespace {
 constexpr ULONG_PTR kOwnInput = 0x4155544Fu;
 constexpr UINT kTrayMessage = WM_APP + 1;
+constexpr int kToggleHotkeyId = 0x1001;
+constexpr UINT kToggleHotkeyModifiers = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT;
+constexpr UINT kToggleHotkeyKey = 'H';
 Model model;
 std::unique_ptr<PendingWord> word;
 HWND mainWindow=nullptr, previewWindow=nullptr, toggleButton=nullptr, statusLabel=nullptr;
@@ -33,6 +36,7 @@ std::atomic<ULONGLONG> focusEpoch{1};
 bool enabled=false;
 bool sending=false;
 bool blockedWord=false;
+bool toggleHotkeyRegistered=false;
 constexpr COLORREF kCanvas=RGB(248,249,252);
 constexpr COLORREF kInk=RGB(26,32,44);
 constexpr COLORREF kMuted=RGB(111,120,137);
@@ -233,6 +237,7 @@ LRESULT CALLBACK keyHook(int code,WPARAM message,LPARAM raw) {
         word->toggle(); refreshPreview(); return 1;
     }
     if(ctrl||alt||win) {
+        if(ctrl && alt && !shift && !win && vk=='H') return CallNextHookEx(nullptr,code,message,raw);
         if(!word->empty() && vk!=VK_CONTROL && vk!=VK_LCONTROL && vk!=VK_RCONTROL &&
            vk!=VK_MENU && vk!=VK_LMENU && vk!=VK_RMENU && vk!=VK_LWIN && vk!=VK_RWIN) {
             status(L"단축키를 쓰기 전에 스페이스로 단어를 확정하거나 Esc로 취소하세요.");
@@ -294,7 +299,7 @@ LRESULT CALLBACK previewProc(HWND h,UINT m,WPARAM w,LPARAM l) {
 void setEnabled(bool value) {
     if(!value && word && !word->empty()) { status(L"입력 중인 단어를 스페이스로 확정하거나 Esc로 취소하세요."); return; }
     enabled=value; SetWindowTextW(toggleButton,enabled?L"자동 입력 끄기":L"자동 입력 켜기");
-    status(enabled?L"켜짐 · 다른 앱의 입력창에서 입력하세요.":L"꺼짐 · 버튼을 눌러 시작하세요.");
+    status(enabled?L"켜짐 · 다른 앱의 입력창에서 입력하세요.":L"꺼짐 · Ctrl + Alt + H 또는 버튼으로 시작하세요.");
     InvalidateRect(toggleButton,nullptr,TRUE);
     refreshPreview();
 }
@@ -307,7 +312,7 @@ LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM l) {
         toggleButton=CreateWindowW(L"BUTTON",L"자동 입력 켜기",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,22,117,169,46,h,(HMENU)1,nullptr,nullptr);
         CreateWindowW(L"BUTTON",L"대기 입력 취소",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,199,117,169,46,h,(HMENU)2,nullptr,nullptr);
         statusLabel=CreateWindowW(L"STATIC",L"꺼짐 · 시작하려면 버튼을 눌러주세요",WS_CHILD|WS_VISIBLE|SS_LEFT,47,187,313,30,h,nullptr,nullptr,nullptr);
-        helperLabel=CreateWindowW(L"STATIC",L"한/영 전환  ·  Space 확정  ·  Esc 취소",WS_CHILD|WS_VISIBLE|SS_CENTER,24,226,342,18,h,nullptr,nullptr,nullptr);
+        helperLabel=CreateWindowW(L"STATIC",L"전역 단축키: Ctrl + Alt + H",WS_CHILD|WS_VISIBLE|SS_CENTER,24,226,342,18,h,nullptr,nullptr,nullptr);
         EnumChildWindows(h,[](HWND child, LPARAM font)->BOOL { SendMessageW(child,WM_SETFONT,(WPARAM)font,TRUE); return TRUE; },(LPARAM)uiFont);
         SendMessageW(brandLabel,WM_SETFONT,(WPARAM)titleFont,TRUE);
         SendMessageW(versionLabel,WM_SETFONT,(WPARAM)microFont,TRUE);
@@ -348,6 +353,11 @@ LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM l) {
         word->clear(); ownerFocus=nullptr; ownerForeground=nullptr; blockedWord=false;
         status(enabled?L"켜짐 · 입력할 곳을 클릭하세요":L"꺼짐 · 시작하려면 버튼을 눌러주세요"); refreshPreview(); InvalidateRect(h,nullptr,TRUE); return 0;
     }
+    if(m==WM_HOTKEY && w==(WPARAM)kToggleHotkeyId) {
+        setEnabled(!enabled);
+        InvalidateRect(h,nullptr,TRUE);
+        return 0;
+    }
     if(m==WM_TIMER) {
         if(word && !word->empty() && !ownerIsFocused() && !blockedWord) {
             blockedWord=true; status(L"입력창이 바뀌었습니다. 대기 입력을 취소한 뒤 다시 입력하세요.");
@@ -356,7 +366,13 @@ LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM l) {
     }
     if(m==WM_CLOSE && word && !word->empty()) { status(L"입력 중인 단어를 먼저 확정하거나 취소하세요."); return 0; }
     if(m==WM_CLOSE) { DestroyWindow(h); return 0; }
-    if(m==WM_DESTROY) { PostQuitMessage(0); return 0; }
+    if(m==WM_DESTROY) {
+        if(toggleHotkeyRegistered) {
+            UnregisterHotKey(h,kToggleHotkeyId);
+            toggleHotkeyRegistered=false;
+        }
+        PostQuitMessage(0); return 0;
+    }
     return DefWindowProcW(h,m,w,l);
 }
 }
@@ -384,6 +400,13 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show) {
     RECT windowRect{0,0,390,252}; AdjustWindowRectEx(&windowRect,windowStyle,FALSE,0);
     mainWindow=CreateWindowExW(WS_EX_APPWINDOW,wc.lpszClassName,L"Auto-Type v" AUTOTYPE_VERSION,windowStyle,100,100,
         windowRect.right-windowRect.left,windowRect.bottom-windowRect.top,nullptr,nullptr,instance,nullptr);
+    if(mainWindow) {
+        toggleHotkeyRegistered=RegisterHotKey(mainWindow,kToggleHotkeyId,kToggleHotkeyModifiers,kToggleHotkeyKey)!=FALSE;
+        if(!toggleHotkeyRegistered) {
+            status(L"Ctrl + Alt + H를 등록하지 못했습니다. 앱 버튼을 사용하세요.");
+            SetWindowTextW(helperLabel,L"단축키 사용 불가 · 앱 버튼을 사용하세요");
+        }
+    }
     monitorStop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     if(monitorStop) monitorThread=CreateThread(nullptr,0,watchFocus,nullptr,0,nullptr);
     keyboardHook=SetWindowsHookExW(WH_KEYBOARD_LL,keyHook,instance,0);
