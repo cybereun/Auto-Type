@@ -1,12 +1,22 @@
 # Auto-Type v1.0.2
 
+<p align="center">
+  <a href="https://github.com/cybereun/Auto-Type/actions/workflows/build.yml"><img alt="Build" src="https://github.com/cybereun/Auto-Type/actions/workflows/build.yml/badge.svg"></a>
+  <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&logoColor=white">
+  <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white">
+  <a href="https://github.com/cybereun/Auto-Type/releases"><img alt="Releases" src="https://img.shields.io/github/v/release/cybereun/Auto-Type?include_prereleases"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-yellow"></a>
+  <a href="https://github.com/cybereun"><img alt="Developer: cybereun" src="https://img.shields.io/badge/developer-cybereun-181717?logo=github"></a>
+</p>
+
 Windows에서 단어를 입력할 때 한글과 영어를 자동으로 판단하는 단독 실행형 도우미입니다. 입력 중인 단어는 별도 미리보기 창에 표시되고 스페이스 또는 Enter 등을 누르면 현재 입력창에 전달됩니다.
 
 ## 실행
 
 1. GitHub Releases의 `Auto-Type-1.0.2-Windows-x64.exe` 또는 `Auto-Type-Setup-1.0.2.exe`를 내려받습니다.
 2. **자동 입력 켜기**를 누른 뒤 원하는 앱의 입력창에서 입력합니다.
-3. 앱을 종료하면 기능이 꺼집니다. Windows에 키보드 입력기로 설치하거나 시작 프로그램에 등록하지 않습니다.
+3. 앱이 실행 중이면 **Ctrl + Alt + H**로 자동 입력을 켜고 끌 수 있습니다.
+4. 앱을 종료하면 기능이 꺼집니다. Windows에 키보드 입력기로 설치하거나 시작 프로그램에 등록하지 않습니다.
 
 | 입력 | 기능 |
 | --- | --- |
@@ -37,6 +47,17 @@ build-x64/Release/pending_word_test.exe resources/model-v2.dat
 
 `AutoTypePreview.exe`가 단독 실행 앱입니다. 저장소에 남아 있는 `src/tsf`는 이전 버전의 Windows 입력기 실험 코드이며, v1.0.2 배포 파일에는 포함하지 않습니다.
 
-## 라이선스
+## 개발자 정보
 
-Auto-Type은 MIT 라이선스입니다. 한영 판별 로직과 모델은 Tavi에서 가져왔으며 상세 내용은 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)에 있습니다.
+| 항목 | 정보 |
+| --- | --- |
+| 개발자 | **cybereun** |
+| GitHub | [@cybereun](https://github.com/cybereun) |
+| 저장소 | [cybereun/Auto-Type](https://github.com/cybereun/Auto-Type) |
+| 문의·버그 제보 | [GitHub Issues](https://github.com/cybereun/Auto-Type/issues) |
+
+## 저작권 및 라이선스
+
+Copyright © 2026 **cybereun**. Auto-Type은 [MIT License](LICENSE)로 배포됩니다.
+
+한영 판별 로직과 언어 모델은 [Tavi](https://github.com/3x-haust/tavi)에서 가져왔으며 Copyright © 2026 **3x-haust**, MIT License를 따릅니다. 상세 내용은 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요.
