@@ -1,6 +1,6 @@
 ; Auto-Type installer. Build: iscc /DAppVersion=0.1.0 installer\AutoType.iss
 #ifndef AppVersion
-  #define AppVersion "0.0.0"
+  #define AppVersion "0.2.8"
 #endif
 
 [Setup]
@@ -38,6 +38,7 @@ Source: "..\build-x64\Release\AutoType.dll"; DestDir: "{app}\{#AppVersion}\x64";
 Source: "..\build-x86\Release\AutoType.dll"; DestDir: "{app}\{#AppVersion}\x86"; Flags: regserver 32bit ignoreversion
 Source: "..\scripts\debug-on.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\scripts\debug-off.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\scripts\register-user-input.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -76,15 +77,40 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  X64Registered, X86Registered, UserProfileAdded: Boolean;
+  Base: String;
 begin
   if CurStep = ssPostInstall then
+  begin
     RemoveOldVersions();
+    Base := ExpandConstant('{app}\{#AppVersion}');
+    X64Registered := Exec(ExpandConstant('{sys}\regsvr32.exe'), '/s "' + Base + '\x64\AutoType.dll"', '',
+      SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+    X86Registered := Exec(ExpandConstant('{syswow64}\regsvr32.exe'), '/s "' + Base + '\x86\AutoType.dll"', '',
+      SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+    UserProfileAdded := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\register-user-input.ps1') + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+    if not (X64Registered and X86Registered and UserProfileAdded) then
+      MsgBox('Auto-Type 등록을 완전히 마치지 못했습니다. 설치 후 Win+Space 목록에 Auto-Type가 없으면 다시 설치해 주세요.',
+        mbError, MB_OK);
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Base: String;
+  ResultCode: Integer;
 begin
+  if CurUninstallStep = usUninstall then
+  begin
+    Base := ExpandConstant('{app}');
+    Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Base + '\register-user-input.ps1" -Remove',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
   if CurUninstallStep = usPostUninstall then
   begin
     Base := ExpandConstant('{app}');

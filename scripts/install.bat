@@ -14,6 +14,7 @@ if exist "%~dp0x86\AutoType.dll" (
   copy /y "%~dp0x86\AutoType.dll" "%DIR%\x86\" >nul
   "%SystemRoot%\SysWOW64\regsvr32.exe" /s "%DIR%\x86\AutoType.dll"
 )
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0register-user-input.ps1" || goto fail
 echo 설치 완료. 설정 - 시간 및 언어 - 언어 및 지역 - 한국어 - 언어 옵션 - 키보드 에서
 echo "Auto-Type (한영 자동)"이 보이는지 확인하세요. Win+Space 로 전환합니다.
 pause

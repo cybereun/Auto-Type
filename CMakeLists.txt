@@ -20,6 +20,7 @@ if(WIN32)
   add_library(AutoType SHARED
     src/tsf/Dll.cpp
     src/tsf/TextService.cpp
+    src/tsf/PreviewWindow.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/AutoType.rc
     src/tsf/AutoType.def)
   set_target_properties(AutoType PROPERTIES PREFIX "")

@@ -4,6 +4,7 @@ rem Auto-Type 제거: 관리자 권한으로 실행하세요. 기존 Microsoft �
 setlocal
 set DIR=%ProgramFiles%\AutoType
 net session >nul 2>&1 || (echo 관리자 권한으로 실행해 주세요. & pause & exit /b 1)
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0register-user-input.ps1" -Remove
 if exist "%DIR%\x64\AutoType.dll" regsvr32 /u /s "%DIR%\x64\AutoType.dll"
 if exist "%DIR%\x86\AutoType.dll" "%SystemRoot%\SysWOW64\regsvr32.exe" /u /s "%DIR%\x86\AutoType.dll"
 rem 열린 앱이 DLL을 쥐고 있어 지금 못 지운 파일은 다음 로그인 때 지웁니다 (재부팅 불필요).

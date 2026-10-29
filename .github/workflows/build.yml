@@ -58,7 +58,7 @@ jobs:
           New-Item -ItemType Directory -Force pkg/x64, pkg/x86 | Out-Null
           Copy-Item build-x64/Release/AutoType.dll pkg/x64/
           Copy-Item build-x86/Release/AutoType.dll pkg/x86/
-          Copy-Item scripts/install.bat, scripts/uninstall.bat, scripts/debug-on.bat, scripts/debug-off.bat, README.md, LICENSE, THIRD_PARTY_NOTICES.md pkg/
+          Copy-Item scripts/install.bat, scripts/uninstall.bat, scripts/debug-on.bat, scripts/debug-off.bat, scripts/register-user-input.ps1, README.md, LICENSE, THIRD_PARTY_NOTICES.md pkg/
           Compress-Archive -Path pkg/* -DestinationPath "out/AutoType-${{ steps.version.outputs.value }}-portable.zip" -Force
 
       - uses: actions/upload-artifact@v4

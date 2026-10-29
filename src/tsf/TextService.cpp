@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <string>
+#include <vector>
 
 namespace autotype {
 
@@ -81,22 +82,44 @@ void resend(WPARAM key) {
     SendInput(2, inputs, sizeof(INPUT));
 }
 
-void moveCaretToEnd(TfEditCookie ec, ITfContext* context, ITfRange* range) {
-    ITfRange* caret = nullptr;
-    if (FAILED(range->Clone(&caret))) return;
-    caret->Collapse(ec, TF_ANCHOR_END);
-    TF_SELECTION selection = {};
-    selection.range = caret;
-    selection.style.ase = TF_AE_NONE;
-    selection.style.fInterimChar = FALSE;
-    context->SetSelection(ec, 1, &selection);
-    caret->Release();
+// Some applications expose a TSF context but reject ITfInsertAtSelection for this edit session.
+// The non-activating preview keeps focus in the target app, so Unicode input is a safe fallback.
+bool sendUnicodeText(const std::u32string& text) {
+    const std::u16string utf16 = toUtf16(text);
+    if (utf16.empty()) return false;
+
+    std::vector<INPUT> inputs;
+    inputs.reserve(utf16.size() * 2);
+    for (char16_t value : utf16) {
+        INPUT downInput{};
+        downInput.type = INPUT_KEYBOARD;
+        downInput.ki.wScan = static_cast<WORD>(value);
+        downInput.ki.dwFlags = KEYEVENTF_UNICODE;
+        inputs.push_back(downInput);
+
+        INPUT upInput = downInput;
+        upInput.ki.dwFlags |= KEYEVENTF_KEYUP;
+        inputs.push_back(upInput);
+    }
+
+    const UINT sent = SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+    if (sent != inputs.size()) {
+        char line[64];
+        wsprintfA(line, "unicode fallback sent=%u/%u", sent, static_cast<unsigned>(inputs.size()));
+        debugLog(line);
+        return false;
+    }
+    debugLog("unicode fallback committed");
+    return true;
 }
 
 }  // namespace
 
 TextService::TextService() : engine_(sharedModel()) { dllAddRef(); }
-TextService::~TextService() { dllRelease(); }
+TextService::~TextService() {
+    preview_.destroy();
+    dllRelease();
+}
 
 STDMETHODIMP TextService::QueryInterface(REFIID riid, void** out) {
     if (!out) return E_INVALIDARG;
@@ -106,8 +129,6 @@ STDMETHODIMP TextService::QueryInterface(REFIID riid, void** out) {
         *out = static_cast<ITfTextInputProcessorEx*>(this);
     else if (IsEqualIID(riid, IID_ITfKeyEventSink))
         *out = static_cast<ITfKeyEventSink*>(this);
-    else if (IsEqualIID(riid, IID_ITfCompositionSink))
-        *out = static_cast<ITfCompositionSink*>(this);
     else if (IsEqualIID(riid, IID_ITfCompartmentEventSink))
         *out = static_cast<ITfCompartmentEventSink*>(this);
     if (!*out) return E_NOINTERFACE;
@@ -127,13 +148,22 @@ STDMETHODIMP TextService::Activate(ITfThreadMgr* threadMgr, TfClientId clientId)
 }
 
 STDMETHODIMP TextService::ActivateEx(ITfThreadMgr* threadMgr, TfClientId clientId, DWORD) {
+    // Some hosts, especially immersive Windows UI fields, do not allow a TIP to create
+    // a regular top-level preview window. The preview is optional; failing to create it
+    // must not prevent the text service from receiving and committing keys through TSF.
+    if (!preview_.create()) debugLog("preview window unavailable; continuing without preview");
     threadMgr_ = threadMgr;
     threadMgr_->AddRef();
     clientId_ = clientId;
     ITfKeystrokeMgr* keystrokes = nullptr;
     if (SUCCEEDED(threadMgr_->QueryInterface(IID_ITfKeystrokeMgr, reinterpret_cast<void**>(&keystrokes)))) {
-        keystrokes->AdviseKeyEventSink(clientId_, static_cast<ITfKeyEventSink*>(this), TRUE);
+        const HRESULT adviseResult = keystrokes->AdviseKeyEventSink(clientId_, static_cast<ITfKeyEventSink*>(this), TRUE);
+        char line[64];
+        wsprintfA(line, "AdviseKeyEventSink=0x%08lX", adviseResult);
+        debugLog(line);
         keystrokes->Release();
+    } else {
+        debugLog("ITfKeystrokeMgr query failed");
     }
     announceKoreanMode();
     watchCompartments(true);
@@ -166,6 +196,8 @@ void TextService::announceKoreanMode() {
 }
 
 STDMETHODIMP TextService::Deactivate() {
+    preview_.hide();
+    preview_.destroy();
     watchCompartments(false);
     if (threadMgr_) {
         ITfKeystrokeMgr* keystrokes = nullptr;
@@ -176,18 +208,13 @@ STDMETHODIMP TextService::Deactivate() {
         threadMgr_->Release();
         threadMgr_ = nullptr;
     }
-    if (composition_) {
-        composition_->Release();
-        composition_ = nullptr;
-    }
     engine_.clear();
-    resume_ = false;
     clientId_ = TF_CLIENTID_NULL;
     return S_OK;
 }
 
 TextService::Action TextService::classify(WPARAM key, char* letter) const {
-    const bool composing = !engine_.empty() && !resume_;
+    const bool composing = !engine_.empty();
     const bool shift = down(VK_SHIFT);
     // Idle 한/영 key is swallowed: it would otherwise switch Windows to "IME off" and stop Auto-Type.
     if (key == VK_HANGUL) return composing ? Action::Toggle : Action::Swallow;
@@ -200,18 +227,24 @@ TextService::Action TextService::classify(WPARAM key, char* letter) const {
         *letter = static_cast<char>(shift != caps ? key : key + 32);
         return Action::Append;
     }
-    if (key >= '0' && key <= '9' && !shift && (composing || resume_)) {
+    if (key >= '0' && key <= '9' && !shift && composing) {
         *letter = static_cast<char>(key);
         return Action::Append;
     }
     if (!composing) return Action::Pass;
     if (key == VK_BACK) return Action::Backspace;
+    if (key == VK_ESCAPE) return Action::Cancel;
     if (key == VK_SPACE) return Action::CommitSpace;
     return Action::CommitThenPass;
 }
 
 STDMETHODIMP TextService::OnSetFocus(BOOL foreground) {
-    if (foreground) announceKoreanMode();
+    if (foreground) {
+        announceKoreanMode();
+    } else {
+        engine_.clear();
+        preview_.hide();
+    }
     return S_OK;
 }
 
@@ -243,56 +276,46 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, 
     char letter = 0;
     const Action action = classify(wParam, &letter);
     *eaten = action != Action::Pass;
-    if (resume_) {
-        bool resumed = false;
-        if (action == Action::Append) {
-            runEdit(context, [&](TfEditCookie ec) { resumed = reclaim(ec, context); });
-        }
-        resume_ = false;
-        orphan_.clear();
-        // Could not take the word back (the app moved the caret or changed the text): start fresh.
-        debugLog(resumed ? "took the word back" : "could not take the word back");
-        if (!resumed) engine_.commit();
-    }
     switch (action) {
         case Action::Pass:
         case Action::Swallow:
             break;
         case Action::Append:
             engine_.append(letter);
-            runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
+            {
+                bool shown = false;
+                runEdit(context, [&](TfEditCookie ec) { shown = showPreview(ec, context, engine_.text()); });
+                if (!shown) showPreview(0, nullptr, engine_.text());
+            }
             break;
         case Action::Backspace:
             engine_.backspace();
-            if (engine_.empty()) runEdit(context, [&](TfEditCookie ec) { endComposition(ec, context, U""); });
-            else runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
+            if (engine_.empty()) preview_.hide();
+            else {
+                bool shown = false;
+                runEdit(context, [&](TfEditCookie ec) { shown = showPreview(ec, context, engine_.text()); });
+                if (!shown) showPreview(0, nullptr, engine_.text());
+            }
             break;
         case Action::Toggle:
             engine_.toggleLanguage();
-            runEdit(context, [&](TfEditCookie ec) { showText(ec, context, engine_.text()); });
+            {
+                bool shown = false;
+                runEdit(context, [&](TfEditCookie ec) { shown = showPreview(ec, context, engine_.text()); });
+                if (!shown) showPreview(0, nullptr, engine_.text());
+            }
+            break;
+        case Action::Cancel:
+            engine_.clear();
+            preview_.hide();
             break;
         case Action::CommitSpace:
-            commitNow(context, U" ");
+            if (!commitNow(context, U" ")) debugLog("space commit failed");
             break;
         case Action::CommitThenPass:
-            commitNow(context, U"");
-            resend(wParam);
+            if (commitNow(context, U"")) resend(wParam);
+            else debugLog("text commit failed; pass-through key held");
             break;
-    }
-    return S_OK;
-}
-
-STDMETHODIMP TextService::OnCompositionTerminated(TfEditCookie, ITfComposition*) {
-    // The app ended the word. Keep what is on screen, and remember it so that, if the next key
-    // continues the same word, the word is taken back instead of being split (되어야 + go).
-    debugLog("app ended the composition");
-    if (composition_) {
-        composition_->Release();
-        composition_ = nullptr;
-    }
-    if (!engine_.empty()) {
-        orphan_ = engine_.text();
-        resume_ = !orphan_.empty();
     }
     return S_OK;
 }
@@ -358,87 +381,116 @@ STDMETHODIMP TextService::OnChange(REFGUID id) {
     return S_OK;
 }
 
-// Restarts the composition over the word the app just committed, if it is still right before the caret.
-bool TextService::reclaim(TfEditCookie ec, ITfContext* context) {
-    const std::u16string expected = toUtf16(orphan_);
-    if (expected.empty() || expected.size() > 64) return false;
-    ITfInsertAtSelection* insert = nullptr;
-    ITfContextComposition* contextComposition = nullptr;
-    ITfRange* range = nullptr;
-    bool ok = false;
-    if (SUCCEEDED(context->QueryInterface(IID_ITfInsertAtSelection, reinterpret_cast<void**>(&insert))) &&
-        SUCCEEDED(insert->InsertTextAtSelection(ec, TF_IAS_QUERYONLY, nullptr, 0, &range))) {
-        LONG shifted = 0;
-        range->Collapse(ec, TF_ANCHOR_START);
-        if (SUCCEEDED(range->ShiftStart(ec, -static_cast<LONG>(expected.size()), &shifted, nullptr)) &&
-            -shifted == static_cast<LONG>(expected.size())) {
-            WCHAR buffer[65] = {};
-            ULONG got = 0;
-            if (SUCCEEDED(range->GetText(ec, 0, buffer, 64, &got)) && got == expected.size() &&
-                std::equal(expected.begin(), expected.end(), buffer) &&
-                SUCCEEDED(context->QueryInterface(IID_ITfContextComposition, reinterpret_cast<void**>(&contextComposition))) &&
-                SUCCEEDED(contextComposition->StartComposition(ec, range, static_cast<ITfCompositionSink*>(this), &composition_)) &&
-                composition_) {
-                ok = true;
-            }
-        }
-    }
-    if (contextComposition) contextComposition->Release();
-    if (range) range->Release();
-    if (insert) insert->Release();
-    return ok;
-}
-
-void TextService::runEdit(ITfContext* context, std::function<void(TfEditCookie)> body) {
-    if (!context) return;
+HRESULT TextService::runEdit(ITfContext* context, std::function<void(TfEditCookie)> body) {
+    if (!context) return E_INVALIDARG;
     auto* session = new EditSession(std::move(body));
-    HRESULT result = S_OK;
-    context->RequestEditSession(clientId_, session, TF_ES_SYNC | TF_ES_READWRITE, &result);
+    HRESULT sessionResult = E_FAIL;
+    const HRESULT requestResult = context->RequestEditSession(clientId_, session, TF_ES_SYNC | TF_ES_READWRITE, &sessionResult);
     session->Release();
-}
-
-void TextService::showText(TfEditCookie ec, ITfContext* context, const std::u32string& text) {
-    if (!composition_) {
-        ITfInsertAtSelection* insert = nullptr;
-        ITfContextComposition* contextComposition = nullptr;
-        ITfRange* range = nullptr;
-        if (SUCCEEDED(context->QueryInterface(IID_ITfInsertAtSelection, reinterpret_cast<void**>(&insert))) &&
-            SUCCEEDED(insert->InsertTextAtSelection(ec, TF_IAS_QUERYONLY, nullptr, 0, &range)) &&
-            SUCCEEDED(context->QueryInterface(IID_ITfContextComposition, reinterpret_cast<void**>(&contextComposition)))) {
-            contextComposition->StartComposition(ec, range, static_cast<ITfCompositionSink*>(this), &composition_);
-        }
-        if (range) range->Release();
-        if (insert) insert->Release();
-        if (contextComposition) contextComposition->Release();
-        if (!composition_) return;
+    if (FAILED(requestResult) || FAILED(sessionResult)) {
+        char line[96];
+        wsprintfA(line, "edit request=0x%08lX session=0x%08lX", requestResult, sessionResult);
+        debugLog(line);
     }
-    ITfRange* range = nullptr;
-    if (FAILED(composition_->GetRange(&range))) return;
-    std::u16string utf16 = toUtf16(text);
-    std::wstring wide(utf16.begin(), utf16.end());
-    range->SetText(ec, 0, wide.c_str(), static_cast<LONG>(wide.size()));
-    moveCaretToEnd(ec, context, range);
-    range->Release();
+    return FAILED(requestResult) ? requestResult : sessionResult;
 }
 
-void TextService::endComposition(TfEditCookie ec, ITfContext* context, const std::u32string& finalText) {
-    if (!finalText.empty()) showText(ec, context, finalText);
-    if (!composition_) return;
-    if (finalText.empty()) {
-        ITfRange* range = nullptr;
-        if (SUCCEEDED(composition_->GetRange(&range))) {
-            range->SetText(ec, 0, L"", 0);
-            range->Release();
+bool TextService::showPreview(TfEditCookie ec, ITfContext* context, const std::u32string& text) {
+    if (text.empty()) {
+        preview_.hide();
+        return false;
+    }
+
+    ITfContextView* view = nullptr;
+    ULONG fetched = 0;
+    TF_SELECTION selection{};
+    RECT caret{};
+    BOOL clipped = FALSE;
+    bool haveCaret = false;
+
+    if (context && SUCCEEDED(context->GetActiveView(&view)) && view &&
+        SUCCEEDED(context->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection, &fetched)) &&
+        fetched && selection.range) {
+        haveCaret = SUCCEEDED(view->GetTextExt(ec, selection.range, &caret, &clipped)) &&
+                    caret.right >= caret.left && caret.bottom >= caret.top;
+        selection.range->Release();
+        selection.range = nullptr;
+    }
+    if (!haveCaret) {
+        GUITHREADINFO info{};
+        info.cbSize = sizeof(info);
+        if (GetGUIThreadInfo(GetCurrentThreadId(), &info) && info.hwndCaret) {
+            caret = info.rcCaret;
+            MapWindowPoints(info.hwndCaret, nullptr, reinterpret_cast<POINT*>(&caret), 2);
+            haveCaret = true;
         }
     }
-    composition_->EndComposition(ec);
-    composition_->Release();
-    composition_ = nullptr;
+
+    if (!haveCaret && view) {
+        HWND target = nullptr;
+        RECT window{};
+        if (SUCCEEDED(view->GetWnd(&target)) && target && GetWindowRect(target, &window)) {
+            caret = {window.left + 24, window.top + 24, window.left + 25, window.top + 25};
+            haveCaret = true;
+        }
+    }
+    if (view) view->Release();
+
+    if (!haveCaret) {
+        HWND foreground = GetForegroundWindow();
+        RECT window{};
+        if (foreground && GetWindowRect(foreground, &window)) {
+            caret = {window.left + 24, window.top + 24, window.left + 25, window.top + 25};
+            haveCaret = true;
+        }
+    }
+    if (!haveCaret) {
+        preview_.hide();
+        debugLog("could not locate caret for preview");
+        return false;
+    }
+    return preview_.show(text, caret);
 }
 
-void TextService::commitNow(ITfContext* context, const std::u32string& extra) {
-    std::u32string text = engine_.commit() + extra;
-    runEdit(context, [&](TfEditCookie ec) { endComposition(ec, context, text); });
+bool TextService::insertCommittedText(TfEditCookie ec, ITfContext* context, const std::u32string& text) {
+    if (!context || text.empty()) return false;
+    ITfInsertAtSelection* insert = nullptr;
+    const HRESULT queryResult = context->QueryInterface(IID_ITfInsertAtSelection, reinterpret_cast<void**>(&insert));
+    if (FAILED(queryResult) || !insert) {
+        char line[64];
+        wsprintfA(line, "insert interface=0x%08lX", queryResult);
+        debugLog(line);
+        return false;
+    }
+
+    const std::u16string utf16 = toUtf16(text);
+    const std::wstring wide(utf16.begin(), utf16.end());
+    const HRESULT result = insert->InsertTextAtSelection(ec, TF_IAS_NOQUERY, wide.c_str(),
+                                                          static_cast<LONG>(wide.size()), nullptr);
+    insert->Release();
+    if (FAILED(result)) {
+        char line[64];
+        wsprintfA(line, "insert text=0x%08lX", result);
+        debugLog(line);
+    }
+    return SUCCEEDED(result);
+}
+
+bool TextService::commitNow(ITfContext* context, const std::u32string& extra) {
+    if (engine_.empty()) return false;
+    std::u32string text = engine_.text();
+    text += extra;
+    bool inserted = false;
+    const HRESULT editResult = runEdit(context, [&](TfEditCookie ec) { inserted = insertCommittedText(ec, context, text); });
+    if (FAILED(editResult)) {
+        char line[64];
+        wsprintfA(line, "commit edit=0x%08lX", editResult);
+        debugLog(line);
+    }
+    if (!inserted && !sendUnicodeText(text)) return false;
+    engine_.clear();
+    preview_.hide();
+    return true;
 }
 
 }  // namespace autotype
