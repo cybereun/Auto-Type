@@ -45,6 +45,53 @@ int main(int argc, char** argv) {
     expect(model, "go", U"go");
     expect(model, "a", U"a");
     expect(model, "the", U"the");
+    expect(model, "sork", U"내가");
+    expect(model, "sksms", U"나는");
+    expect(model, "sjsms", U"너는");
+    expect(model, "dlfma", U"이름");
+    expect(model, "gksrmf", U"한글");
+    expect(model, "dkssud", U"안녕");
+    expect(model, "input", U"input");
+    expect(model, "speed", U"speed");
+    expect(model, "git", U"git");
+    expect(model, "Git", U"Git");
+    expect(model, "rlt", U"깃");
+    expect(model, "push", U"push");
+    expect(model, "githubsms", U"github는");
+
+    {
+        Engine sentence(model);
+        const auto first = type(sentence, "githubsms");
+        const auto second = type(sentence, "git");
+        const auto third = type(sentence, "push");
+        const auto fourth = type(sentence, "di");
+        const bool ok = first == U"github는" && second == U"git" && third == U"push" && fourth == U"야";
+        if (!ok) ++failures;
+        std::cout << (ok ? "ok   " : "FAIL ") << "mixed sentence -> " << toUtf8(first) << " "
+                  << toUtf8(second) << " " << toUtf8(third) << " " << toUtf8(fourth) << "\n";
+    }
+
+    // A committed English word must not prevent the next Korean word from converting.
+    for (const std::string& prior : {"hello", "the", "go", "input", "speed"}) {
+        Engine sequence(model);
+        type(sequence, prior);
+        const auto got = type(sequence, "sork");
+        const bool ok = got == U"내가";
+        if (!ok) ++failures;
+        std::cout << (ok ? "ok   " : "FAIL ") << prior << " + sork -> " << toUtf8(got) << "\n";
+    }
+
+    // Exercise the two-set composition rules for compound vowels and final consonants.
+    for (const auto& item : std::vector<std::pair<std::string, std::u32string>>{
+             {"rhk", U"과"}, {"rho", U"괘"}, {"rhl", U"괴"}, {"rnj", U"궈"},
+             {"rnp", U"궤"}, {"rnl", U"귀"}, {"rml", U"긔"}, {"rkrtk", U"각사"},
+             {"rksej", U"간더"}, {"rkfrk", U"갈가"}, {"rkqtk", U"갑사"},
+             {"Rk", U"까"}, {"Ek", U"따"}, {"Qk", U"빠"}, {"Tk", U"싸"}, {"Wk", U"짜"}}) {
+        const auto got = hangul::compose(item.first);
+        const bool ok = got == item.second;
+        if (!ok) ++failures;
+        std::cout << (ok ? "ok   " : "FAIL ") << "compose " << item.first << " -> " << toUtf8(got) << "\n";
+    }
 
     // Words start in Korean: the first key shows a jamo, not a Latin letter.
     for (std::string first : {"d", "t", "e", "r"}) {

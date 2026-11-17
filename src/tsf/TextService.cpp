@@ -488,7 +488,7 @@ bool TextService::commitNow(ITfContext* context, const std::u32string& extra) {
         debugLog(line);
     }
     if (!inserted && !sendUnicodeText(text)) return false;
-    engine_.clear();
+    engine_.commit();
     preview_.hide();
     return true;
 }

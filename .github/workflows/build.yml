@@ -75,6 +75,10 @@ jobs:
           name: Auto-Type ${{ steps.version.outputs.value }}
           files: out/*
           body: |
+            ## 변경 사항
+            - `git`이 `햣`으로 잘못 바뀌는 문제를 수정했습니다.
+            - 확정한 앞 단어가 다음 단어의 한영 판단에 반영되도록 했습니다.
+
             ## 설치
             1. `AutoType-Setup-${{ steps.version.outputs.value }}.exe` 를 받아 실행합니다 (관리자 권한 요청이 뜨면 "예").
             2. **Win + Space** 로 `Auto-Type (한영 자동)` 을 고릅니다.

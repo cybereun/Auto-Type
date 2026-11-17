@@ -317,6 +317,8 @@ double Model::averageEnglishLogProbability(const std::string& word) const {
 Model::Evidence Model::englishEvidence(const std::string& token) const {
     std::string n;
     if (!loaded_ || !normalizedAscii(token, n)) return {-kInf, Tier::Unknown};
+    // The model's English dictionary misses this common development term.
+    if (n == "git") return {16.0, Tier::Common};
     Tier tier = commonEnglish_.contains(n) ? Tier::Common : knownEnglish_.contains(n) ? Tier::Known : Tier::Unknown;
     double statistical = 7.0 + averageEnglishLogProbability(n) * 1.15;
     switch (tier) {
@@ -373,6 +375,7 @@ std::vector<Candidate> Engine::score(const std::string& raw) const {
     const bool wholeKoreanWord = hangul::jamoCount(hangulText) == 0 && model_.isKnownKorean(hangulText);
     double englishScore = english.score;
     double koreanScore = model_.koreanScore(hangulText);
+
 
     auto firstUpper = std::find_if(raw.begin(), raw.end(), isUpper);
     const bool koreanShift = anyOf(raw, isLower) && firstUpper != raw.end() && koreanShiftKey(*firstUpper) &&

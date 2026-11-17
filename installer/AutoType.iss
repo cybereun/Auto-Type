@@ -1,6 +1,6 @@
 ; Auto-Type installer. Build: iscc /DAppVersion=0.1.0 installer\AutoType.iss
 #ifndef AppVersion
-  #define AppVersion "0.2.8"
+  #define AppVersion "0.2.9"
 #endif
 
 [Setup]
